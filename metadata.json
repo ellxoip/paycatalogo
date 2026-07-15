@@ -1,0 +1,6 @@
+{
+  "name": "ZelixPay",
+  "description": "Carrito de compras del catálogo Zelix, alojado en www.zelix.cl/pay",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

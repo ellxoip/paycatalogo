@@ -1,0 +1,270 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Pedido del carrito de un cliente final de una PYME Zelix. `pyme_id` referencia
+// a `perfiles.pyme_id` en la base de Zelix (no hay FK cross-database: zelixpay
+// solo LEE ese catálogo vía catalog.service.ts, nunca lo escribe).
+model Order {
+  id                String      @id @default(uuid())
+  pyme_id           String
+  cliente_nombre    String?
+  cliente_telefono  String?
+  cliente_email     String?
+  moneda            String      @default("CLP")
+  total             Decimal     @db.Decimal(12, 2)
+  status            String      @default("creada") // creada, pagada, cancelada, expirada
+  created_at        DateTime    @default(now())
+  updated_at        DateTime    @updatedAt
+  items             OrderItem[]
+  payment_attempts  PaymentAttempt[]
+
+  @@index([pyme_id])
+  @@index([status])
+  @@index([created_at])
+}
+
+// Ítem de un pedido. Snapshot de nombre/precio al momento de la compra porque
+// el catálogo de origen (`pyme_context.productos`) es JSONB mutable — el pedido
+// no debe cambiar si el dueño edita el catálogo después.
+model OrderItem {
+  id              String   @id @default(uuid())
+  order_id        String
+  order           Order    @relation(fields: [order_id], references: [id])
+  product_id      String   // id del producto en pyme_context.productos
+  nombre_snapshot String
+  precio_snapshot Decimal  @db.Decimal(12, 2)
+  cantidad        Int      @default(1)
+  created_at      DateTime @default(now())
+
+  @@index([order_id])
+  @@index([product_id])
+}
+
+model PaymentAttempt {
+  id                      String   @id @default(uuid())
+  external_attempt_id     String   @unique // pc_attempt_...
+  order_id                String
+  order                   Order    @relation(fields: [order_id], references: [id])
+  provider                String   // e.g., flow
+  provider_transaction_id String?  @unique
+  amount                  Decimal  @db.Decimal(12, 2)
+  currency                String   @default("CLP")
+  method                  String?  // tarjeta, transferencia, etc.
+  status                  String   // iniciado, pendiente, autorizado, confirmado, rechazado, expirado, error, reversado
+  // Provider payloads
+  request_payload_json    Json?    // Raw request to provider
+  response_payload_json   Json?    // Raw response from provider
+  provider_payload_json   Json?    // Webhook payload
+  // Timestamps
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
+  payments                Payment[]
+
+  @@index([order_id])
+  @@index([status])
+  @@index([created_at])
+}
+
+model Payment {
+  id                        String   @id @default(uuid())
+  external_payment_id       String   @unique // pc_payment_...
+  payment_attempt_id        String
+  attempt                   PaymentAttempt @relation(fields: [payment_attempt_id], references: [id])
+  provider                  String
+  provider_transaction_id   String?
+  transaction_number        String?
+  amount                    Decimal  @db.Decimal(12, 2)
+  method                    String?
+  status                    String   // confirmado, rechazado, reversado, anulado
+  paid_at                   DateTime?
+  receipt_url               String?
+  billing_status            String   @default("not_required") // not_required, pending, submitted, accepted, rejected, failed
+  billing_document_id       String?  @unique
+  billing_document          BillingDocument? @relation("PaymentBillingDocument", fields: [billing_document_id], references: [id])
+  // Provider raw data
+  raw_provider_payload_json Json?
+  // Timestamps
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
+  reversals                 PaymentReversal[]
+  billing_documents         BillingDocument[] @relation("PaymentBillingDocuments")
+
+  @@unique([payment_attempt_id])
+  @@index([payment_attempt_id])
+  @@index([status])
+  @@index([billing_status])
+  @@index([created_at])
+}
+
+model BillingDocument {
+  id                     String   @id @default(uuid())
+  external_billing_id    String?  @unique
+  payment_id             String
+  payment                Payment  @relation("PaymentBillingDocuments", fields: [payment_id], references: [id])
+  selected_for_payment   Payment? @relation("PaymentBillingDocument")
+  provider               String
+  document_type          String
+  sii_type               String
+  folio                  String?
+  track_id               String?
+  status                 String   @default("pending") // pending, submitted, accepted, rejected, cancelled, failed
+  recipient_rut          String
+  recipient_name         String
+  recipient_email        String?
+  net_amount             Decimal  @db.Decimal(12, 2)
+  tax_amount             Decimal  @db.Decimal(12, 2)
+  total_amount           Decimal  @db.Decimal(12, 2)
+  pdf_url                String?
+  xml_url                String?
+  request_payload_json   Json?
+  response_payload_json  Json?
+  provider_payload_json  Json?
+  error_message          String?
+  retry_count            Int      @default(0)
+  issued_at              DateTime?
+  accepted_at            DateTime?
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
+
+  @@index([payment_id])
+  @@index([provider])
+  @@index([document_type])
+  @@index([sii_type])
+  @@index([status])
+  @@index([created_at])
+}
+
+model PaymentReversal {
+  id                        String   @id @default(uuid())
+  external_reversal_id      String   @unique // pc_reversal_...
+  external_payment_id       String
+  external_attempt_id       String
+  payment_id                String
+  payment                   Payment  @relation(fields: [payment_id], references: [id])
+  provider                  String
+  amount_reversed           Decimal  @db.Decimal(12, 2)
+  reason                    String?
+  provider_reversal_code    String?
+  // Timestamps
+  reversed_at               DateTime
+  created_at                DateTime @default(now())
+  updated_at                DateTime @updatedAt
+
+  @@index([external_payment_id])
+  @@index([external_attempt_id])
+  @@index([payment_id])
+  @@index([created_at])
+}
+
+model IntegrationLog {
+  id                    String   @id @default(uuid())
+  direction             String   // inbound, outbound
+  system                String   // sis_contable, crm, payment_provider
+  event_type            String
+  endpoint              String?
+  http_method           String?
+  request_payload_json  Json?
+  response_payload_json Json?
+  status                Int?
+  duration_ms           Int?
+  error_message         String?
+  created_at            DateTime @default(now())
+
+  @@index([system])
+  @@index([event_type])
+  @@index([direction])
+  @@index([status])
+  @@index([created_at])
+}
+
+model IntegrationOutbox {
+  id                   String   @id @default(uuid())
+  event_type           String
+  aggregate_type       String
+  aggregate_id         String
+  idempotency_key      String   @unique
+  payload_json         Json
+  status               String   @default("pending") // pending, processing, published, failed
+  retry_count          Int      @default(0)
+  last_error           String?
+  next_attempt_at      DateTime?
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  @@index([status, next_attempt_at])
+  @@index([aggregate_type, aggregate_id])
+  @@index([event_type])
+  @@index([created_at])
+}
+
+model DeadLetterQueue {
+  id                   String   @id @default(uuid())
+  source               String
+  event_type           String
+  aggregate_id         String?
+  payload_json         Json?
+  error_message        String
+  retry_count          Int      @default(0)
+  status               String   @default("open") // open, resolved, ignored
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  @@index([status])
+  @@index([source])
+  @@index([event_type])
+  @@index([created_at])
+}
+
+model ReconciliationRun {
+  id                   String   @id @default(uuid())
+  started_at           DateTime @default(now())
+  finished_at          DateTime?
+  status               String   @default("running") // running, completed, failed
+  payments_checked     Int      @default(0)
+  sis_retried          Int      @default(0)
+  crm_retried          Int      @default(0)
+  errors_count         Int      @default(0)
+  result_json          Json?
+
+  @@index([status])
+  @@index([started_at])
+}
+
+model SupportTicket {
+  id                   String   @id @default(uuid())
+  ticket_number        String   @unique
+  requester_identifier String
+  requester_name       String?
+  requester_email      String?
+  requester_phone      String?
+  subject              String
+  category             String
+  priority             String   @default("normal") // low, normal, high, urgent
+  message              String
+  status               String   @default("open") // open, in_progress, answered, closed
+  admin_response       String?
+  assigned_to          String?
+  source               String   @default("client_portal")
+  notification_status  String   @default("pending") // pending, sent, skipped, failed
+  notification_error   String?
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+  answered_at          DateTime?
+
+  @@index([requester_identifier])
+  @@index([requester_email])
+  @@index([status])
+  @@index([category])
+  @@index([created_at])
+}

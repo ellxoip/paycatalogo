@@ -1,0 +1,21 @@
+
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+.claude/
+.vercel/
+
+.vercel
+
+# deploy artifacts
+*.tar.gz
+*.tgz
+.deploy/
+
+# Credenciales locales — nunca versionar
+contraseña.txt
