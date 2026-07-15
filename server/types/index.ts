@@ -2,6 +2,9 @@
 // Catálogo (leído en solo-lectura desde perfiles.pyme_context — base Zelix)
 // ============================================================
 
+// Espejo de ProductoSchema del contrato pyme_context (repo zelix, v1.5+):
+// stock/activo (v1.4, Fase 4j) e imagen_url (v1.5, Fase 5c) son opcionales —
+// los contextos viejos no los tienen.
 export interface CatalogProduct {
   id: string;
   nombre: string;
@@ -9,6 +12,12 @@ export interface CatalogProduct {
   descripcion: string;
   precio: string | null;
   es_estrella: boolean;
+  /** v1.4: cantidad disponible; ausente = no se gestiona stock; 0 = no disponible */
+  stock?: number;
+  /** v1.4: false = pausado por el dueño */
+  activo?: boolean;
+  /** v1.5: foto del producto (Supabase Storage) */
+  imagen_url?: string | null;
 }
 
 export interface CatalogResponse {

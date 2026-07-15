@@ -2,7 +2,7 @@
 
 Carrito de compras que lee el catálogo real de cada PYME (`perfiles.pyme_context.productos`
 en la base de Zelix) y procesa el pago vía **Flow** (hoy en modo simulado/dormido, a la espera
-de credenciales reales). Se aloja en `www.zelix.cl/pay`.
+de credenciales reales). Se aloja en `www.zelix.cl/catalogo/pay`.
 
 Nace como una reproposición completa del proyecto "PagaCuotas" (portal de cuotas de deuda):
 se conservó la capa de proveedor de pago (Flow + simulador) y la infraestructura genérica
@@ -20,9 +20,9 @@ se conservó la capa de proveedor de pago (Flow + simulador) y la infraestructur
 - Validación: Zod
 
 **Frontend (carrito):**
-- React 19, TypeScript, Vite (`base: '/pay/'`)
+- React 19, TypeScript, Vite (`base: '/catalogo/pay/'`)
 - Tailwind CSS v4, Lucide React
-- React Router v7 (`basename="/pay"`)
+- React Router v7 (`basename="/catalogo/pay"`)
 
 ---
 
@@ -71,12 +71,12 @@ npx prisma migrate dev --name init_zelixpay
 
 ```bash
 npm run server   # API (puerto 4000)
-npm run dev      # Frontend (puerto 3003, sirve bajo /pay/)
+npm run dev      # Frontend (puerto 3003, sirve bajo /catalogo/pay/)
 ```
 
 Probar el catálogo real de una PYME:
 ```
-http://localhost:3003/pay/?pyme=<pyme_id de la tabla perfiles>
+http://localhost:3003/catalogo/pay/?pyme=<pyme_id de la tabla perfiles>
 ```
 
 ### Health Check

@@ -41,7 +41,7 @@ export class PaymentController {
   // GET/POST /api/payments/callback — Provider redirect
   // ===========================================================
   async handleProviderCallback(req: Request, res: Response) {
-    const clientBase = (process.env.CLIENT_PORTAL_BASE_URL || 'http://localhost:3003/pay').replace(/\/+$/, '');
+    const clientBase = (process.env.CLIENT_PORTAL_BASE_URL || 'http://localhost:3003/catalogo/pay').replace(/\/+$/, '');
     try {
       const token = (req.query.token || req.query.token_ws || req.body?.token || req.body?.token_ws) as string;
       const providerName = (req.query.provider || req.body?.provider) as string | undefined;

@@ -23,7 +23,7 @@ function PageFallback() {
 
 export default function App() {
   return (
-    <BrowserRouter basename="/pay">
+    <BrowserRouter basename="/catalogo/pay">
       <Suspense fallback={<PageFallback />}>
         <Routes>
           <Route element={<ClientLayout />}>

@@ -101,21 +101,34 @@ export default function Catalog() {
         const precio = parsePrecio(producto.precio);
         return (
           <Card key={producto.id} className="flex items-start justify-between gap-4">
-            <div className="min-w-0 space-y-1">
-              <div className="flex items-center gap-2">
-                <h3 className="font-bold text-slate-900 truncate">{producto.nombre}</h3>
-                {producto.es_estrella && (
-                  <Badge variant="warning" showIcon={false}>
-                    <Star className="h-3 w-3" /> Destacado
-                  </Badge>
+            <div className="flex min-w-0 items-start gap-3">
+              {producto.imagen_url && (
+                <img
+                  src={producto.imagen_url}
+                  alt={producto.nombre}
+                  loading="lazy"
+                  className="h-16 w-16 shrink-0 rounded-xl border border-border-subtle object-cover"
+                />
+              )}
+              <div className="min-w-0 space-y-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-slate-900 truncate">{producto.nombre}</h3>
+                  {producto.es_estrella && (
+                    <Badge variant="warning" showIcon={false}>
+                      <Star className="h-3 w-3" /> Destacado
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-on-surface-variant line-clamp-2">{producto.descripcion}</p>
+                {precio !== null ? (
+                  <Money amount={precio} moneda={catalog.moneda} className="text-lg" />
+                ) : (
+                  <p className="text-xs italic text-on-surface-variant">Precio a confirmar</p>
+                )}
+                {typeof producto.stock === 'number' && producto.stock > 0 && producto.stock <= 5 && (
+                  <p className="text-[11px] font-semibold text-warning-orange">¡Quedan {producto.stock}!</p>
                 )}
               </div>
-              <p className="text-xs text-on-surface-variant line-clamp-2">{producto.descripcion}</p>
-              {precio !== null ? (
-                <Money amount={precio} moneda={catalog.moneda} className="text-lg" />
-              ) : (
-                <p className="text-xs italic text-on-surface-variant">Precio a confirmar</p>
-              )}
             </div>
 
             <div className="shrink-0">

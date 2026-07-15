@@ -7,6 +7,10 @@ export interface CatalogProduct {
   descripcion: string;
   precio: string | null;
   es_estrella: boolean;
+  /** v1.4 del contrato: ausente = sin gestión de stock (el backend ya filtró los agotados) */
+  stock?: number;
+  /** v1.5 del contrato: foto del producto */
+  imagen_url?: string | null;
 }
 
 export interface CatalogResponse {

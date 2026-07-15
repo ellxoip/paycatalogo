@@ -1,6 +1,6 @@
 import prisma from '../lib/prisma.js';
 import type { Prisma } from '@prisma/client';
-import { catalogService } from './catalog.service.js';
+import { catalogService, productoDisponible } from './catalog.service.js';
 import { providerRegistry } from '../providers/index.js';
 import { logger } from '../lib/logger.js';
 import type { IPaymentProvider, ProviderName } from '../providers/types.js';
@@ -35,7 +35,9 @@ export class PaymentService {
       throw { message: 'El carrito está vacío', status: 400, code: 'EMPTY_CART' };
     }
 
-    const catalog = await catalogService.getCatalog(data.pyme_id);
+    // Con no-disponibles incluidos, para distinguir "no existe" de "agotado/pausado"
+    // (regla de disponibilidad espejo de Fase 4j en zelix).
+    const catalog = await catalogService.getCatalog(data.pyme_id, { incluirNoDisponibles: true });
     if (!catalog) {
       throw { message: 'PYME o catálogo no encontrado', status: 404, code: 'CATALOG_NOT_FOUND' };
     }
@@ -48,11 +50,17 @@ export class PaymentService {
       if (!producto) {
         throw { message: `Producto "${item.product_id}" no existe en el catálogo`, status: 400, code: 'PRODUCT_NOT_FOUND' };
       }
+      if (!productoDisponible(producto)) {
+        throw { message: `"${producto.nombre}" no está disponible en este momento`, status: 400, code: 'PRODUCT_UNAVAILABLE' };
+      }
+      const cantidad = Math.max(1, Math.floor(item.cantidad || 1));
+      if (typeof producto.stock === 'number' && cantidad > producto.stock) {
+        throw { message: `"${producto.nombre}" solo tiene ${producto.stock} unidad(es) disponible(s)`, status: 400, code: 'INSUFFICIENT_STOCK' };
+      }
       const precio = parsePrecio(producto.precio);
       if (precio === null) {
         throw { message: `"${producto.nombre}" no tiene precio publicado — no se puede agregar al carrito`, status: 400, code: 'PRODUCT_WITHOUT_PRICE' };
       }
-      const cantidad = Math.max(1, Math.floor(item.cantidad || 1));
       orderItems.push({ product_id: producto.id, nombre_snapshot: producto.nombre, precio_snapshot: precio, cantidad });
     }
 

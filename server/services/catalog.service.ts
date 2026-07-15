@@ -11,8 +11,20 @@ const pool = new Pool({
   max: 5,
 });
 
+// Misma regla que productoDisponible en el repo zelix (messageRules.ts, Fase 4j):
+// ausente = activo y sin gestión de stock (retrocompatible v1.2/v1.3).
+export function productoDisponible(p: CatalogProduct): boolean {
+  return p.activo !== false && p.stock !== 0;
+}
+
 export class CatalogService {
-  async getCatalog(pymeId: string): Promise<CatalogResponse | null> {
+  /**
+   * Catálogo vigente de la PYME. Por defecto solo productos disponibles —
+   * el carrito jamás vitrinea lo pausado/agotado (espejo de
+   * filtrarCatalogoDisponible en zelix). `incluirNoDisponibles` existe para
+   * que la creación de orden distinga "no existe" de "agotado".
+   */
+  async getCatalog(pymeId: string, opts: { incluirNoDisponibles?: boolean } = {}): Promise<CatalogResponse | null> {
     const { rows } = await pool.query(
       `select p.nombre as pyme_nombre, pf.pyme_context
          from perfiles pf
@@ -32,19 +44,13 @@ export class CatalogService {
       tono?: { moneda?: string };
     };
 
+    const productos = context.productos ?? [];
     return {
       pyme_id: pymeId,
       pyme_nombre: row.pyme_nombre,
       moneda: context.tono?.moneda || 'CLP',
-      productos: context.productos ?? [],
+      productos: opts.incluirNoDisponibles ? productos : productos.filter(productoDisponible),
     };
-  }
-
-  async getProducts(pymeId: string, productIds: string[]): Promise<CatalogProduct[]> {
-    const catalog = await this.getCatalog(pymeId);
-    if (!catalog) return [];
-    const wanted = new Set(productIds);
-    return catalog.productos.filter((producto) => wanted.has(producto.id));
   }
 }
 
