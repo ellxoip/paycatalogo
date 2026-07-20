@@ -20,6 +20,8 @@ import { getPaymentProvider } from '../../lib/env';
 export default function Checkout() {
   const [searchParams] = useSearchParams();
   const pymeId = searchParams.get('pyme') || '';
+  const clienteChatId = searchParams.get('cliente') || undefined; // §10.8 2.2
+  const canalOrigen = searchParams.get('canal') || undefined;
   const result = searchParams.get('result');
 
   const [cart, setCart] = useState<CartItem[]>(pymeId ? getCart(pymeId) : []);
@@ -80,6 +82,8 @@ export default function Checkout() {
         items: cart.map((item) => ({ product_id: item.product_id, cantidad: item.cantidad })),
         cliente_nombre: nombre || undefined,
         cliente_telefono: telefono || undefined,
+        cliente_chat_id: clienteChatId, // §10.8 2.2 — se propaga al Order y al evento order.paid
+        canal_origen: canalOrigen,
         cliente_email: email || undefined,
         provider: getPaymentProvider(),
       });

@@ -74,6 +74,8 @@ export class PaymentService {
         cliente_nombre: data.cliente_nombre || null,
         cliente_telefono: data.cliente_telefono || null,
         cliente_email: data.cliente_email || null,
+        cliente_chat_id: data.cliente_chat_id || null, // §10.8 2.2 — cadena de identidad
+        canal_origen: data.canal_origen || null,
         moneda: catalog.moneda,
         total,
         status: 'creada',
@@ -311,14 +313,13 @@ export class PaymentService {
     try {
       const order = await prisma.order.findUnique({ where: { id: orderId }, include: { items: true } });
       if (!order) return;
-      const o = order as typeof order & { cliente_chat_id?: string | null; canal_origen?: string | null };
       const payload: OrderPaidPayload = {
         event: 'order.paid',
         external_payment_id: externalPaymentId,
         order_id: order.id,
         pyme_id: order.pyme_id,
-        cliente_chat_id: o.cliente_chat_id ?? null, // 2.2: cadena de identidad (nullable hasta que el carrito la propague)
-        canal_origen: o.canal_origen ?? null,
+        cliente_chat_id: order.cliente_chat_id ?? null, // §10.8 2.2 — cadena de identidad
+        canal_origen: order.canal_origen ?? null,
         total: Number(order.total),
         moneda: order.moneda,
         paid_at: (paidAt ?? new Date()).toISOString(),

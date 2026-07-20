@@ -131,6 +131,8 @@ export async function createOrder(payload: {
   cliente_nombre?: string;
   cliente_telefono?: string;
   cliente_email?: string;
+  cliente_chat_id?: string; // §10.8 2.2 — identidad para unir el pago a la conversación
+  canal_origen?: string;
   provider?: string;
 }): Promise<CreateOrderResponse> {
   const response = await fetch(`${API_BASE_URL}/api/orders`, {

@@ -21,6 +21,8 @@ model Order {
   cliente_nombre    String?
   cliente_telefono  String?
   cliente_email     String?
+  cliente_chat_id   String?     // §10.8 2.2 — chat_id/wa_id del cliente (une la Order pagada a su conversación en Zelix)
+  canal_origen      String?     // §10.8 2.2 — 'telegram' | 'whatsapp' (para notificar por el canal correcto)
   moneda            String      @default("CLP")
   total             Decimal     @db.Decimal(12, 2)
   status            String      @default("creada") // creada, pagada, cancelada, expirada

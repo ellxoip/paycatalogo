@@ -15,6 +15,8 @@ export const createOrderSchema = z.object({
   cliente_nombre: z.string().optional(),
   cliente_telefono: z.string().optional(),
   cliente_email: z.string().email().optional().or(z.literal('')),
+  cliente_chat_id: z.string().max(64).optional(), // §10.8 2.2
+  canal_origen: z.enum(['telegram', 'whatsapp']).optional(),
   provider: z.enum(['flow', 'simulator']).optional(),
 });
 

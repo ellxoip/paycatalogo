@@ -23,6 +23,8 @@ export default function Catalog() {
   const navigate = useNavigate();
   const pymeId = searchParams.get('pyme') || '';
   const preselected = (searchParams.get('productos') || '').split(',').filter(Boolean);
+  const clienteChatId = searchParams.get('cliente') || ''; // §10.8 2.2 — identidad del bot
+  const canalOrigen = searchParams.get('canal') || '';
 
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -168,7 +170,13 @@ export default function Catalog() {
               <Money amount={total} moneda={catalog.moneda} className="text-lg" />
             </div>
             <Button
-              onClick={() => navigate(`/checkout?pyme=${encodeURIComponent(pymeId)}`)}
+              onClick={() => {
+                // §10.8 2.2 — preserva la identidad (cliente/canal) al ir al checkout.
+                const qs = new URLSearchParams({ pyme: pymeId });
+                if (clienteChatId) qs.set('cliente', clienteChatId);
+                if (canalOrigen) qs.set('canal', canalOrigen);
+                navigate(`/checkout?${qs.toString()}`);
+              }}
               leftIcon={<ShoppingCart className="h-4 w-4" />}
             >
               Ir al carrito

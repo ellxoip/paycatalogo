@@ -42,6 +42,8 @@ export interface CreateOrderRequest {
   cliente_nombre?: string;
   cliente_telefono?: string;
   cliente_email?: string;
+  cliente_chat_id?: string; // §10.8 2.2 — identidad para unir el pago a la conversación
+  canal_origen?: string;
   provider?: string;
 }
 
