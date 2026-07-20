@@ -1,13 +1,14 @@
 import { outboxService } from '../services/outbox.service.js';
 import { logger } from '../lib/logger.js';
+import { publishOrderPaid } from './orderPaidHandler.js';
 
 const OUTBOX_WORKER_ENABLED = process.env.OUTBOX_WORKER_ENABLED !== 'false';
 
-// Sin handlers registrados por ahora: nada encola eventos al outbox en esta
-// fase (no hay CRM/SIS.CONTABLE que sincronizar). Cuando exista un consumidor
-// real (p.ej. notificar a Zelix que una orden se pagó), registrar el handler
-// aquí y encolar el evento correspondiente en payment.service.ts.
-export function registerOutboxHandlers() {}
+// Costura order.paid (§10.8, 2.1): al pagarse una orden, payment.service la encola
+// en el outbox; este handler la publica (POST firmado) al receptor de Zelix.
+export function registerOutboxHandlers() {
+  outboxService.registerHandler('order.paid', (payload) => publishOrderPaid(payload as Parameters<typeof publishOrderPaid>[0]));
+}
 
 export function startBackgroundWorkers() {
   if (!OUTBOX_WORKER_ENABLED) {

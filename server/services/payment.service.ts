@@ -3,6 +3,8 @@ import type { Prisma } from '@prisma/client';
 import { catalogService, productoDisponible } from './catalog.service.js';
 import { providerRegistry } from '../providers/index.js';
 import { logger } from '../lib/logger.js';
+import { outboxService } from './outbox.service.js';
+import { publishOrderPaid, type OrderPaidPayload } from '../workers/orderPaidHandler.js';
 import type { IPaymentProvider, ProviderName } from '../providers/types.js';
 import type {
   CreateOrderRequest,
@@ -289,6 +291,11 @@ export class PaymentService {
 
       await prisma.order.update({ where: { id: attempt.order_id }, data: { status: 'pagada' } });
 
+      // Costura order.paid (§10.8 B) — avisar a Zelix: encolar en el outbox (durable,
+      // idempotente por external_payment_id) + intento inline inmediato (best-effort).
+      // Nunca bloquea ni revierte el pago: si Zelix está caído, el cron lo reintenta.
+      await this.emitOrderPaid(attempt.order_id, external_payment_id, payment.paid_at);
+
       return payment;
     } catch (err: any) {
       if (err.code === 'P2002') {
@@ -296,6 +303,42 @@ export class PaymentService {
         if (existingPayment) return existingPayment;
       }
       throw err;
+    }
+  }
+
+  /** Costura order.paid (§10.8 B) — arma el payload, lo encola y hace un intento inline. */
+  private async emitOrderPaid(orderId: string, externalPaymentId: string, paidAt: Date | null) {
+    try {
+      const order = await prisma.order.findUnique({ where: { id: orderId }, include: { items: true } });
+      if (!order) return;
+      const o = order as typeof order & { cliente_chat_id?: string | null; canal_origen?: string | null };
+      const payload: OrderPaidPayload = {
+        event: 'order.paid',
+        external_payment_id: externalPaymentId,
+        order_id: order.id,
+        pyme_id: order.pyme_id,
+        cliente_chat_id: o.cliente_chat_id ?? null, // 2.2: cadena de identidad (nullable hasta que el carrito la propague)
+        canal_origen: o.canal_origen ?? null,
+        total: Number(order.total),
+        moneda: order.moneda,
+        paid_at: (paidAt ?? new Date()).toISOString(),
+        items: order.items.map((i) => ({
+          product_id: i.product_id,
+          nombre_snapshot: i.nombre_snapshot,
+          precio_snapshot: i.precio_snapshot != null ? String(i.precio_snapshot) : null,
+          cantidad: i.cantidad,
+        })),
+      };
+      const idempotencyKey = `order.paid:${externalPaymentId}`;
+      await outboxService.enqueue({ eventType: 'order.paid', aggregateType: 'Order', aggregateId: order.id, idempotencyKey, payload });
+      try {
+        await publishOrderPaid(payload); // intento inline inmediato (best-effort)
+        await outboxService.markPublished(idempotencyKey);
+      } catch (e: any) {
+        logger.warn('order.paid inline falló, queda para el cron', { orderId, error: e?.message || String(e) });
+      }
+    } catch (e: any) {
+      logger.error('emitOrderPaid falló (no bloquea el pago)', { orderId, error: e?.message || String(e) });
     }
   }
 
