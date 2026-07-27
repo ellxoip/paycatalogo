@@ -23,6 +23,11 @@ model Order {
   cliente_email     String?
   cliente_chat_id   String?     // §10.8 2.2 — chat_id/wa_id del cliente (une la Order pagada a su conversación en Zelix)
   canal_origen      String?     // §10.8 2.2 — 'telegram' | 'whatsapp' (para notificar por el canal correcto)
+  // Huella de origen: la usa fraudGuard para medir velocidad por comprador y
+  // frenar el card testing (ráfagas de órdenes desde una misma IP contra varios
+  // comercios). No es dato de negocio: es evidencia antifraude.
+  cliente_ip        String?
+  cliente_user_agent String?
   moneda            String      @default("CLP")
   total             Decimal     @db.Decimal(12, 2)
   status            String      @default("creada") // creada, pagada, cancelada, expirada
@@ -34,6 +39,7 @@ model Order {
   @@index([pyme_id])
   @@index([status])
   @@index([created_at])
+  @@index([cliente_ip, created_at])
 }
 
 // Ítem de un pedido. Snapshot de nombre/precio al momento de la compra porque

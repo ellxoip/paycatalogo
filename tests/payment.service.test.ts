@@ -95,7 +95,7 @@ vi.mock('../server/services/catalog.service.js', async (importOriginal) => {
 vi.mock('../server/providers/index.js', async () => {
   const { SimulatorProvider } = await import('../server/providers/simulator.provider.js');
   const sim = new SimulatorProvider({ delayMs: 0 }); // provider REAL, sin espera artificial
-  return { providerRegistry: { get: () => sim }, isSimulatorDemoEnabled: () => true };
+  return { providerRegistry: { get: () => sim, getDefault: () => sim }, isSimulatorDemoEnabled: () => true };
 });
 
 import { paymentService } from '../server/services/payment.service.js';
@@ -259,5 +259,54 @@ describe('confirmación de pago (callback del proveedor, simulador REAL)', () =>
     await expect(codeOf(paymentService.processWebhook({
       external_attempt_id: 'zpay_attempt_fantasma', status: 'approved', amount: 1000,
     } as never))).resolves.toBe('ATTEMPT_NOT_FOUND');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Blindaje: el monto de la orden manda, y el proveedor no lo elige el cliente
+// ---------------------------------------------------------------------------
+describe('blindaje de pagos', () => {
+  it('webhook "approved" con monto distinto al de la orden → AMOUNT_MISMATCH, sin Payment ni Order pagada', async () => {
+    await crear([{ product_id: 'panceta' }]); // 12990
+    const att = h.state.attempts[0];
+
+    const code = await codeOf(paymentService.processWebhook({
+      external_attempt_id: att.external_attempt_id,
+      provider_transaction_id: att.provider_transaction_id,
+      status: 'approved',
+      amount: 100, // el atacante declara pagar 100 por una orden de 12.990
+    } as never));
+
+    expect(code).toBe('AMOUNT_MISMATCH');
+    expect(h.state.payments).toHaveLength(0);
+    expect(h.state.orders[0].status).toBe('creada');
+  });
+
+  it('el monto declarado se ignora: el Payment se registra con el monto de la orden', async () => {
+    const r = await crear([{ product_id: 'panceta' }]);
+    const att = h.state.attempts[0];
+
+    await paymentService.processWebhook({
+      external_attempt_id: att.external_attempt_id,
+      provider_transaction_id: att.provider_transaction_id,
+      status: 'approved',
+      amount: Number(att.amount),
+    } as never);
+
+    expect(Number(h.state.payments[0].amount)).toBe(r.total);
+  });
+
+  it('en producción el provider del body se ignora (no se puede pedir "simulator" para pagar gratis)', async () => {
+    const previo = process.env.PAYMENT_ENVIRONMENT;
+    process.env.PAYMENT_ENVIRONMENT = 'production';
+    try {
+      // El registry mockeado devuelve siempre el simulador; lo que se comprueba
+      // es que resolveProviderName consulta al registry (getDefault) y NO al body.
+      const r = await crear([{ product_id: 'panceta' }], { provider: 'simulator' });
+      expect(r.provider).toBe('simulator'); // el del servidor, no el pedido
+    } finally {
+      if (previo === undefined) delete process.env.PAYMENT_ENVIRONMENT;
+      else process.env.PAYMENT_ENVIRONMENT = previo;
+    }
   });
 });

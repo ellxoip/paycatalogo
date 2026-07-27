@@ -4,6 +4,7 @@ import { paymentService } from '../services/payment.service.js';
 import { catalogService } from '../services/catalog.service.js';
 import { providerRegistry } from '../providers/index.js';
 import { logger } from '../lib/logger.js';
+import { clientIp, clientUserAgent } from '../lib/clientIp.js';
 
 export class PaymentController {
 
@@ -28,7 +29,10 @@ export class PaymentController {
   // ===========================================================
   async createOrder(req: Request, res: Response) {
     try {
-      const result = await paymentService.createOrderWithPaymentIntent(req.body);
+      const result = await paymentService.createOrderWithPaymentIntent(req.body, {
+        ip: clientIp(req),
+        userAgent: clientUserAgent(req),
+      });
       res.status(201).json({ ok: true, ...result });
     } catch (error: any) {
       res.status(error.status || 400).json({
@@ -116,6 +120,14 @@ export class PaymentController {
     const providerHealth = await providerRegistry.healthCheckAll();
     const status = databaseStatus === 'connected' ? 'healthy' : 'degraded';
 
+    // /api/health es público (lo consulta el proxy y el monitoreo). El detalle
+    // del error de base y el mensaje de cada proveedor pueden filtrar cadenas de
+    // conexión o fragmentos de credenciales: solo salen si quien pregunta trae
+    // el secreto de operación.
+    const opsSecret = process.env.ZELIXPAY_WEBHOOK_SECRET;
+    const authHeader = _req.headers.authorization;
+    const isOperator = Boolean(opsSecret) && authHeader === `Bearer ${opsSecret}`;
+
     res.status(status === 'healthy' ? 200 : 503).json({
       ok: status === 'healthy',
       status,
@@ -123,8 +135,13 @@ export class PaymentController {
       environment: providerRegistry.getEnvironment(),
       timestamp: new Date().toISOString(),
       database: databaseStatus,
-      database_error: databaseError,
-      providers: providerHealth,
+      ...(isOperator
+        ? { database_error: databaseError, providers: providerHealth }
+        : {
+            providers: Object.fromEntries(
+              Object.entries(providerHealth).map(([name, health]) => [name, { healthy: health.healthy }]),
+            ),
+          }),
     });
   }
 }

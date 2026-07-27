@@ -4,6 +4,7 @@ import { catalogService, productoDisponible } from './catalog.service.js';
 import { providerRegistry } from '../providers/index.js';
 import { logger } from '../lib/logger.js';
 import { outboxService } from './outbox.service.js';
+import { fraudGuard } from './fraudGuard.js';
 import { publishOrderPaid, type OrderPaidPayload } from '../workers/orderPaidHandler.js';
 import type { IPaymentProvider, ProviderName } from '../providers/types.js';
 import type {
@@ -24,12 +25,18 @@ function parsePrecio(precio: string | null): number | null {
   return Number.isFinite(value) && value > 0 ? Math.round(value) : null;
 }
 
+/** Huella de la request que crea la orden (para fraudGuard y auditoría). */
+export interface OrderRequestContext {
+  ip?: string;
+  userAgent?: string | null;
+}
+
 export class PaymentService {
 
   // ===========================================================
   // 1. Crear pedido (carrito -> Order + OrderItem) + intención de pago
   // ===========================================================
-  async createOrderWithPaymentIntent(data: CreateOrderRequest) {
+  async createOrderWithPaymentIntent(data: CreateOrderRequest, requestContext: OrderRequestContext = {}) {
     if (!data.pyme_id) {
       throw { message: 'pyme_id es requerido', status: 400, code: 'MISSING_PYME_ID' };
     }
@@ -68,6 +75,17 @@ export class PaymentService {
 
     const total = orderItems.reduce((acc, item) => acc + item.precio_snapshot * item.cantidad, 0);
 
+    // Antifraude ANTES de crear la orden y de abrir una transacción en Flow: una
+    // transacción abierta ya cuesta (aparece en el panel del comercio y suma a la
+    // tasa de rechazo aunque nadie la pague).
+    await fraudGuard.assertOrderAllowed({
+      ip: requestContext.ip || 'unknown',
+      pymeId: data.pyme_id,
+      amount: total,
+      email: data.cliente_email,
+      telefono: data.cliente_telefono,
+    });
+
     const order = await prisma.order.create({
       data: {
         pyme_id: data.pyme_id,
@@ -76,6 +94,8 @@ export class PaymentService {
         cliente_email: data.cliente_email || null,
         cliente_chat_id: data.cliente_chat_id || null, // §10.8 2.2 — cadena de identidad
         canal_origen: data.canal_origen || null,
+        cliente_ip: requestContext.ip || null,
+        cliente_user_agent: requestContext.userAgent || null,
         moneda: catalog.moneda,
         total,
         status: 'creada',
@@ -157,7 +177,7 @@ export class PaymentService {
       },
     });
 
-    if (confirmation.approved) {
+    if (confirmation.approved && this.assertAmountMatches(attempt, confirmation.amount, 'callback')) {
       return this.processApprovedPayment(attempt, {
         external_attempt_id: attempt.external_attempt_id,
         provider_transaction_id: confirmation.provider_transaction_id,
@@ -173,8 +193,8 @@ export class PaymentService {
       provider_transaction_id: confirmation.provider_transaction_id,
       status: 'rejected',
       amount: Number(attempt.amount),
-      error_message: confirmation.reason,
-      error_code: confirmation.error_code,
+      error_message: confirmation.approved ? 'Monto confirmado no coincide con la orden' : confirmation.reason,
+      error_code: confirmation.approved ? 'AMOUNT_MISMATCH' : confirmation.error_code,
     });
   }
 
@@ -191,7 +211,13 @@ export class PaymentService {
     }
 
     if (providerData.status === 'approved') {
-      return this.processApprovedPayment(attempt, providerData);
+      // Este webhook no viene firmado por ninguna pasarela: la ruta exige secreto
+      // compartido (middleware/webhookAuth.ts) y aquí, además, el monto declarado
+      // tiene que calzar con el de la orden. Nunca se aprueba por el body solo.
+      if (!this.assertAmountMatches(attempt, providerData.amount, 'webhook-interno')) {
+        throw { message: 'Amount mismatch', status: 400, code: 'AMOUNT_MISMATCH' };
+      }
+      return this.processApprovedPayment(attempt, { ...providerData, amount: Number(attempt.amount) });
     }
     return this.processRejectedPayment(attempt, providerData);
   }
@@ -206,6 +232,18 @@ export class PaymentService {
     const paymentId = String(body?.token || query?.token || body?.token_ws || query?.token_ws || body?.provider_transaction_id || '');
     if (!paymentId) {
       throw { message: 'Missing provider payment id', status: 400, code: 'MISSING_PAYMENT_ID' };
+    }
+
+    // Flow NO firma sus notificaciones: manda un `token` por POST y el patrón que
+    // el propio Flow indica es re-consultar el estado. Como el token no prueba
+    // nada por sí solo, primero se exige que corresponda a una transacción que
+    // NOSOTROS abrimos. Sin esto, un tercero puede hacer que nuestro servidor
+    // dispare llamadas salientes a Flow con tokens arbitrarios (sondeo de
+    // transacciones ajenas y amplificación contra la API de la pasarela).
+    const conocido = await prisma.paymentAttempt.findFirst({ where: { provider_transaction_id: paymentId } });
+    if (!conocido) {
+      logger.warn('Webhook de pasarela con token desconocido — descartado sin consultar a Flow', { provider: providerName });
+      throw { message: 'Unknown provider payment id', status: 404, code: 'UNKNOWN_PAYMENT_ID' };
     }
 
     const confirmation = await provider.confirmTransaction(paymentId);
@@ -227,7 +265,7 @@ export class PaymentService {
       },
     });
 
-    if (confirmation.approved) {
+    if (confirmation.approved && this.assertAmountMatches(attempt, confirmation.amount, 'webhook')) {
       return this.processApprovedPayment(attempt, {
         external_attempt_id: attempt.external_attempt_id,
         provider_transaction_id: confirmation.provider_transaction_id,
@@ -235,6 +273,19 @@ export class PaymentService {
         amount: confirmation.amount || Number(attempt.amount),
         method: confirmation.payment_method,
         authorization_code: confirmation.authorization_code,
+      });
+    }
+
+    if (confirmation.approved) {
+      // Aprobado por la pasarela pero con monto que no calza: se marca rechazado
+      // y queda el rastro para revisarlo a mano (§ blindaje de pagos).
+      return this.processRejectedPayment(attempt, {
+        external_attempt_id: attempt.external_attempt_id,
+        provider_transaction_id: confirmation.provider_transaction_id,
+        status: 'error',
+        amount: Number(attempt.amount),
+        error_message: 'Monto confirmado no coincide con la orden',
+        error_code: 'AMOUNT_MISMATCH',
       });
     }
 
@@ -429,10 +480,47 @@ export class PaymentService {
     return '';
   }
 
+  /**
+   * En producción el proveedor NO lo elige el cliente. Aceptar `provider` del
+   * body significa que un `{"provider":"simulator"}` produce un pago aprobado
+   * sin plata en cuanto alguien deje el simulador registrado (demo, prueba,
+   * variable mal puesta). El body se ignora y manda la configuración del server.
+   */
   private resolveProviderName(requestedProvider?: string): ProviderName {
+    const isProduction = process.env.PAYMENT_ENVIRONMENT === 'production';
+    if (isProduction) {
+      if (requestedProvider && requestedProvider !== providerRegistry.getDefault().name) {
+        logger.warn('Provider pedido por el cliente ignorado en producción', { requestedProvider });
+      }
+      return providerRegistry.getDefault().name;
+    }
+
     const candidate = (requestedProvider || process.env.PAYMENT_DEFAULT_PROVIDER || 'simulator') as ProviderName;
     if (candidate === 'simulator') return 'simulator';
     return 'flow';
+  }
+
+  /**
+   * El monto que confirma la pasarela debe ser el de la orden. Si difiere, el
+   * pago NO se aprueba: o hay manipulación, o hay un desajuste de datos — en
+   * ambos casos confirmarlo entrega mercadería contra un cobro que no calza.
+   * (Los proveedores que no informan monto devuelven 0: eso no es discrepancia.)
+   */
+  private assertAmountMatches(attempt: any, reportedAmount: number | undefined, source: string): boolean {
+    const expected = Number(attempt.amount);
+    const reported = Number(reportedAmount || 0);
+    if (!reported) return true;
+    // Tolerancia de 1 unidad: CLP no tiene decimales, pero la pasarela puede
+    // redondear distinto en monedas que sí.
+    if (Math.abs(reported - expected) <= 1) return true;
+
+    logger.error('Monto confirmado no coincide con la orden — pago NO aprobado', {
+      source,
+      externalAttemptId: attempt.external_attempt_id,
+      expected,
+      reported,
+    });
+    return false;
   }
 }
 

@@ -53,6 +53,22 @@ export function validateEnvironment() {
       addRequired(errors, 'FLOW_API_KEY', ['change_me']);
       addRequired(errors, 'FLOW_SECRET_KEY', ['change_me']);
     }
+
+    // Blindaje de pagos: en producción, las rutas que mueven dinero sin firma de
+    // pasarela no pueden quedar abiertas. Sin estos secretos el server responde
+    // 503 en esas rutas (fail-closed), pero es mejor que no arranque a que quede
+    // sirviendo pagos con la puerta de reversas cerrada por accidente.
+    addRequired(errors, 'ZELIXPAY_WEBHOOK_SECRET', ['change_me']);
+    addRequired(errors, 'CRON_SECRET', ['change_me']);
+
+    const webhookSecret = process.env.ZELIXPAY_WEBHOOK_SECRET;
+    if (webhookSecret && webhookSecret.length < 32) {
+      errors.push('ZELIXPAY_WEBHOOK_SECRET debe tener al menos 32 caracteres');
+    }
+
+    if (!process.env.CORS_ALLOWED_ORIGINS) {
+      warnings.push('CORS_ALLOWED_ORIGINS no configurado: se usa la lista por defecto (zelix.cl).');
+    }
   }
 
   for (const warning of warnings) {

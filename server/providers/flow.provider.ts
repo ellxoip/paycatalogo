@@ -96,10 +96,17 @@ export class FlowProvider implements IPaymentProvider {
     };
   }
 
+  /**
+   * Flow NO firma sus notificaciones: el POST a `urlConfirmation` trae solo un
+   * `token`. No hay HMAC que verificar — decir lo contrario sería fingir una
+   * garantía que la pasarela no da. La autenticidad se establece en dos pasos,
+   * ambos fuera de aquí: (1) `payment.service` exige que el token corresponda a
+   * una transacción que nosotros abrimos, y (2) se re-consulta `getStatus`
+   * firmado contra Flow, que es la fuente de verdad. El body nunca decide.
+   */
   validateWebhookSignature(_headers: Record<string, string>, body: any): boolean {
     if (this.environment === 'sandbox' && this.isPlaceholderConfig()) return true;
-    const token = body?.token;
-    return Boolean(token);
+    return Boolean(body?.token);
   }
 
   async healthCheck(): Promise<{ healthy: boolean; message: string }> {
@@ -107,7 +114,9 @@ export class FlowProvider implements IPaymentProvider {
     if (this.environment === 'production' && missing) {
       return { healthy: false, message: 'Flow production credentials missing' };
     }
-    return { healthy: true, message: `Flow ${this.environment} configured - API Key: ${this.apiKey.slice(0, 8)}...` };
+    // Nunca se devuelve ni un fragmento de la apiKey: este mensaje viaja en
+    // /api/health, que es público.
+    return { healthy: true, message: `Flow ${this.environment} configurado` };
   }
 
   private async postSigned(path: string, params: Record<string, any>) {
