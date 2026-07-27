@@ -296,6 +296,28 @@ describe('blindaje de pagos', () => {
     expect(Number(h.state.payments[0].amount)).toBe(r.total);
   });
 
+  it('con Flow, sin correo del comprador → CUSTOMER_EMAIL_REQUIRED y NADA se persiste', async () => {
+    // Flow valida el dominio del correo (exige MX): sin correo no hay
+    // transacción posible. Descubrirlo después de crear la Order dejaba basura
+    // en la base y un 400 opaco de la pasarela en la cara del cliente.
+    const previo = process.env.PAYMENT_DEFAULT_PROVIDER;
+    process.env.PAYMENT_DEFAULT_PROVIDER = 'flow';
+    try {
+      expect(await codeOf(crear([{ product_id: 'panceta' }]))).toBe('CUSTOMER_EMAIL_REQUIRED');
+      expect(h.state.orders).toHaveLength(0);
+      expect(h.state.attempts).toHaveLength(0);
+    } finally {
+      if (previo === undefined) delete process.env.PAYMENT_DEFAULT_PROVIDER;
+      else process.env.PAYMENT_DEFAULT_PROVIDER = previo;
+    }
+  });
+
+  it('el simulador NO exige correo (la restricción es de Flow, no del carrito)', async () => {
+    const r = await crear([{ product_id: 'panceta' }]);
+    expect(r.provider).toBe('simulator');
+    expect(h.state.orders).toHaveLength(1);
+  });
+
   it('en producción el provider del body se ignora (no se puede pedir "simulator" para pagar gratis)', async () => {
     const previo = process.env.PAYMENT_ENVIRONMENT;
     process.env.PAYMENT_ENVIRONMENT = 'production';

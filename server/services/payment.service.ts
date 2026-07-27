@@ -75,6 +75,22 @@ export class PaymentService {
 
     const total = orderItems.reduce((acc, item) => acc + item.precio_snapshot * item.cantidad, 0);
 
+    // El proveedor se resuelve ANTES de escribir nada, para poder exigir lo que
+    // ese proveedor necesita sin dejar una Order huérfana si falta un dato.
+    const providerName = this.resolveProviderName(data.provider);
+    const provider: IPaymentProvider = providerRegistry.get(providerName);
+
+    // Flow valida el correo contra el dominio (exige MX real): sin correo del
+    // comprador no hay transacción posible, y descubrirlo después de crear la
+    // orden deja basura en la base y un 400 opaco en la cara del cliente.
+    if (providerName === 'flow' && !data.cliente_email) {
+      throw {
+        message: 'Necesitamos tu correo para emitir el comprobante de pago.',
+        status: 400,
+        code: 'CUSTOMER_EMAIL_REQUIRED',
+      };
+    }
+
     // Antifraude ANTES de crear la orden y de abrir una transacción en Flow: una
     // transacción abierta ya cuesta (aparece en el panel del comercio y suma a la
     // tasa de rechazo aunque nadie la pague).
@@ -105,8 +121,6 @@ export class PaymentService {
     });
 
     const external_attempt_id = `zpay_attempt_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-    const providerName = this.resolveProviderName(data.provider);
-    const provider: IPaymentProvider = providerRegistry.get(providerName);
 
     const description = orderItems.length === 1
       ? orderItems[0].nombre_snapshot

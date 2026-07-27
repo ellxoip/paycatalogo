@@ -32,13 +32,25 @@ export class FlowProvider implements IPaymentProvider {
   async createTransaction(request: ProviderCreateTransactionRequest): Promise<ProviderCreateTransactionResponse> {
     if (this.environment === 'sandbox' && this.isPlaceholderConfig()) return this.sandboxCreate(request);
 
+    // Flow EXIGE un correo con dominio real (valida MX): rechaza tanto
+    // `...@pagacuotas.local` como `...@zelix.cl` (el dominio no tiene correo).
+    // No hay remitente genérico posible, así que el correo del comprador es
+    // obligatorio — y se falla acá con un mensaje claro en vez de dejar que
+    // Flow devuelva un 400 opaco a mitad del checkout.
+    if (!request.customer_email) {
+      throw Object.assign(new Error('Falta el correo del comprador: la pasarela lo exige para emitir el comprobante.'), {
+        status: 400,
+        code: 'CUSTOMER_EMAIL_REQUIRED',
+      });
+    }
+
     const params = {
       apiKey: this.apiKey,
       commerceOrder: request.external_attempt_id,
       subject: request.description,
       currency: request.currency || 'CLP',
       amount: Math.round(request.amount),
-      email: request.customer_email || 'cliente@pagacuotas.local',
+      email: request.customer_email,
       urlConfirmation: `${request.notification_url}/flow`,
       urlReturn: `${request.return_url}?provider=flow`,
       optional: JSON.stringify({
@@ -122,8 +134,23 @@ export class FlowProvider implements IPaymentProvider {
   private async postSigned(path: string, params: Record<string, any>) {
     const signed = this.sign(params);
     const body = new URLSearchParams(Object.entries(signed).map(([key, value]) => [key, String(value)]));
-    const response = await this.client.post(path, body, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-    return response.data;
+    try {
+      const response = await this.client.post(path, body, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+      return response.data;
+    } catch (error: any) {
+      // Axios sepulta el motivo real en "Request failed with status code 400";
+      // el diagnóstico verdadero viene en el cuerpo de Flow ({code, message}).
+      // Sin esto, cualquier rechazo de la pasarela llega al operador —y al log—
+      // como un 400 mudo, imposible de resolver sin reproducirlo a mano.
+      const flowError = error?.response?.data;
+      if (flowError?.message) {
+        throw Object.assign(new Error(`Flow rechazó la operación: ${flowError.message}`), {
+          status: 400,
+          code: `FLOW_${flowError.code ?? 'ERROR'}`,
+        });
+      }
+      throw error;
+    }
   }
 
   private async getSigned(path: string, params: Record<string, any>) {

@@ -74,6 +74,14 @@ export default function Checkout() {
   }
 
   async function handlePay() {
+    // La pasarela exige un correo válido (valida el dominio) para emitir el
+    // comprobante: se avisa acá, antes de perder el carrito, en vez de dejar que
+    // el pago falle al final con un error de la pasarela.
+    if (!email.trim()) {
+      setError('Necesitamos tu correo para enviarte el comprobante de pago.');
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     try {
@@ -133,7 +141,15 @@ export default function Checkout() {
         <h2 className="text-sm font-bold uppercase tracking-wider text-on-surface-variant">Tus datos de contacto</h2>
         <Field label="Nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Tu nombre" />
         <Field label="Teléfono" value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="+56 9 1234 5678" />
-        <Field label="Correo (opcional)" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@correo.cl" />
+        <Field
+          label="Correo"
+          type="email"
+          required
+          hint="Te llega ahí el comprobante de pago."
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="tu@correo.cl"
+        />
       </Card>
 
       <div className="fixed bottom-0 left-0 w-full z-50 border-t border-slate-200 bg-white/95 backdrop-blur-md px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
