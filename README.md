@@ -84,6 +84,62 @@ http://localhost:3003/catalogo/pay/?pyme=<pyme_id de la tabla perfiles>
 curl http://localhost:4000/api/health
 ```
 
+`/health` es solo liveness (el proceso responde). `/api/health` es el chequeo
+real: consulta Postgres y los proveedores de pago. **No volver a montar un
+handler de `/api/health` en `app.ts`**: se registraría antes que el router y
+taparía el chequeo real, dejando el monitoreo diciendo "ok" con la base caída
+(pasó, y estuvo así hasta el 2026-07-27).
+
+---
+
+## Despliegue
+
+**Fuente de verdad: GitHub Actions** (`.github/workflows/deploy.yml`), disparado
+por push a `master`. El trabajo real lo hace `scripts/deploy.mjs` — el mismo que
+corre `npm run deploy` en local — para que el camino automático y el manual no
+puedan divergir.
+
+```bash
+npm run deploy          # verifica, despliega y comprueba (break-glass local)
+npm run deploy:check    # solo typecheck + tests + estado, sin desplegar
+npm run deploy:status   # ¿producción está al día? (sale 1 si hay drift)
+```
+
+El procedimiento, en ambos caminos:
+
+1. `tsc --noEmit` y la suite de tests. **Si algo falla, no se despliega.**
+2. Reporta drift: compara el commit vivo en Render contra `origin/master` y
+   lista los commits pendientes.
+3. Lanza el deploy por la API de Render y **espera** a que quede `live`.
+4. Verifica `/api/health`: base conectada, `environment: production` y que el
+   simulador de pagos **no** esté registrado (un simulador vivo en producción
+   son pagos que se aprueban solos).
+5. Confirma que el commit vivo quedó igual a `origin/master`.
+
+### Por qué NO se usa el auto-deploy nativo de Render
+
+Nunca funcionó en este repositorio. Evidencia del 2026-07-27: 7 deploys
+históricos del servicio, **ninguno con trigger `new_commit`** (1 `manual` +
+6 `api`), mientras el servicio hermano `zelix` acumula 45 `new_commit`. La
+GitHub App de Render tiene acceso a `ellxoip/Zelix` pero nunca lo tuvo a
+`ellxoip/paycatalogo`, y el repo no tiene webhooks. El `autoDeploy: yes` del
+panel era una promesa vacía: dejó **11 días** de código del 16/07 sirviendo en
+producción —con la costura `order.paid` entre lo no desplegado— sin una sola
+alerta, porque un deploy que no ocurre no avisa.
+
+El flag quedó en **`autoDeploy: no`** deliberadamente. Si alguien reconecta la
+GitHub App de Render a este repo, **no volver a encenderlo**: el auto-deploy
+nativo despliega cualquier cosa que se empuje, incluido código que no compila, a
+un servicio que cobra dinero real. Dos mecanismos activos significan que el
+camino sin tests gana la carrera.
+
+### Secretos requeridos en el repositorio
+
+| Secreto | Para qué |
+|---|---|
+| `RENDER_API_KEY` | Autenticar contra la API de Render |
+| `RENDER_SERVICE_ID` | Identificar el servicio a desplegar |
+
 ---
 
 ## Estructura de Directorios

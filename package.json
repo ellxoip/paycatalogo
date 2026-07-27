@@ -23,6 +23,7 @@
     "config:production:check": "tsx scripts/check-production-config.ts",
     "deploy": "node scripts/deploy.mjs",
     "deploy:check": "node scripts/deploy.mjs --check",
+    "deploy:status": "node scripts/deploy.mjs --status",
     "test": "vitest run"
   },
   "dependencies": {
