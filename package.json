@@ -21,6 +21,8 @@
     "db:studio": "prisma studio",
     "db:reset": "prisma db push --force-reset",
     "config:production:check": "tsx scripts/check-production-config.ts",
+    "deploy": "node scripts/deploy.mjs",
+    "deploy:check": "node scripts/deploy.mjs --check",
     "test": "vitest run"
   },
   "dependencies": {
