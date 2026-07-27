@@ -6,6 +6,27 @@ import { providerRegistry } from '../providers/index.js';
 import { logger } from '../lib/logger.js';
 import { clientIp, clientUserAgent } from '../lib/clientIp.js';
 
+/**
+ * Un error "de negocio" es el que NOSOTROS lanzamos a propósito (trae `status`):
+ * su mensaje está escrito para el cliente y puede viajar tal cual. Cualquier
+ * otro —Prisma, red, bug— lleva detalle de infraestructura: `invalid input
+ * syntax for type uuid` le confirma a un atacante el motor de base y el tipo de
+ * cada columna. Ese se registra completo y se responde en genérico.
+ */
+function responderError(res: Response, error: any, contexto: string) {
+  const esDeNegocio = typeof error?.status === 'number';
+  if (esDeNegocio) {
+    res.status(error.status).json({ ok: false, code: error.code || 'ERROR', message: error.message });
+    return;
+  }
+  logger.error(`Error inesperado en ${contexto}`, { error: error as Error, code: error?.code });
+  res.status(500).json({
+    ok: false,
+    code: 'INTERNAL_ERROR',
+    message: 'No pudimos procesar tu solicitud. Intenta nuevamente en un momento.',
+  });
+}
+
 export class PaymentController {
 
   // ===========================================================
@@ -20,7 +41,7 @@ export class PaymentController {
       }
       res.json({ ok: true, ...catalog });
     } catch (error: any) {
-      res.status(500).json({ ok: false, code: 'INTERNAL_ERROR', message: error.message });
+      responderError(res, error, 'getCatalog');
     }
   }
 
@@ -35,9 +56,7 @@ export class PaymentController {
       });
       res.status(201).json({ ok: true, ...result });
     } catch (error: any) {
-      res.status(error.status || 400).json({
-        ok: false, code: error.code || 'ORDER_ERROR', message: error.message,
-      });
+      responderError(res, error, 'createOrder');
     }
   }
 
@@ -61,7 +80,11 @@ export class PaymentController {
       if (providerName) query.set('provider', providerName);
       res.redirect(`${clientBase}/checkout?${query.toString()}`);
     } catch (error: any) {
-      res.redirect(`${clientBase}/checkout?result=error&message=${encodeURIComponent(error.message)}`);
+      // El mensaje viaja en la URL del navegador del comprador: solo sale el
+      // texto de un error nuestro; el de infraestructura queda en el log.
+      logger.error('Callback de pasarela falló', { error: error as Error });
+      const visible = typeof error?.status === 'number' ? error.message : 'No pudimos confirmar el pago.';
+      res.redirect(`${clientBase}/checkout?result=error&message=${encodeURIComponent(visible)}`);
     }
   }
 
@@ -74,7 +97,7 @@ export class PaymentController {
       res.json({ ok: true, result });
     } catch (error: any) {
       logger.error('Payment webhook error', { error: error as Error });
-      res.status(error.status || 500).json({ ok: false, code: error.code || 'WEBHOOK_ERROR', message: error.message });
+      responderError(res, error, 'webhook_error');
     }
   }
 
@@ -90,7 +113,7 @@ export class PaymentController {
       res.json({ ok: true, result });
     } catch (error: any) {
       logger.error('Payment provider webhook error', { error: error as Error });
-      res.status(error.status || 500).json({ ok: false, code: error.code || 'WEBHOOK_ERROR', message: error.message });
+      responderError(res, error, 'webhook_error');
     }
   }
 
@@ -99,7 +122,7 @@ export class PaymentController {
       const result = await paymentService.processReversal(req.body);
       res.json({ ok: true, result });
     } catch (error: any) {
-      res.status(error.status || 500).json({ ok: false, code: error.code || 'REVERSAL_ERROR', message: error.message });
+      responderError(res, error, 'reversal_error');
     }
   }
 
