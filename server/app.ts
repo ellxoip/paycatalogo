@@ -61,12 +61,13 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 
-// Health / readiness check — sin auth, para orquestación y monitoreo.
-const healthHandler = (_req: express.Request, res: express.Response) =>
+// Liveness check — "el proceso está arriba", sin tocar la base. Solo en /health:
+// montarlo también en /api/health TAPABA al health real del router (Express
+// resuelve por orden de registro), así que el chequeo de base y proveedores
+// nunca corría y el monitoreo respondía "ok" aunque Postgres estuviera caído.
+app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'zelixpay-api', uptime: process.uptime() });
-app.get('/health', healthHandler);
-app.get('/api/health', healthHandler);
-app.get(`${BASE_PATH}/api/health`, healthHandler);
+});
 
 // API (raíz y bajo el prefijo público)
 app.use('/api', apiRoutes);
