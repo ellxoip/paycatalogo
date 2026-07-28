@@ -41,8 +41,16 @@
 #   despertares de WhatsApp supera las 750 h y Render suspende AMBOS servicios
 #   hasta el día 1. El atajo no adelanta nada: apaga todo dos semanas.
 #
-#   Paso 1 (dashboard, no hay API): crear un segundo workspace Hobby y
-#           transferir a él el servicio zelixpay.
+#   Paso 1: RECREAR el servicio en un segundo workspace Hobby. Ojo: Render NO
+#           permite transferir servicios entre workspaces (verificado 2026-07-28:
+#           no hay opción en el dashboard, `POST /services/{id}/transfer` da 404
+#           y un PATCH con ownerId devuelve 200 pero se ignora en silencio). Hay
+#           que crearlo de nuevo — se puede por API (`POST /v1/services`)
+#           replicando repo, comandos y las 29 variables de entorno.
+#           El servicio nuevo tendrá OTRA URL, así que en el mismo movimiento hay
+#           que actualizar: APP_URL (es la que Flow usa para urlConfirmation),
+#           ZELIXPAY_ORIGIN en el proxy de Cloudflare, el secreto
+#           RENDER_SERVICE_ID en GitHub y las URLs de estos workflows.
 #   Paso 2: recién ahí, cambiar el cron de este archivo a '*/10 5-23,0-3 * * *'
 #           → 23 h/día ≈ 713 h dentro de un presupuesto propio de 750 h.
 #
