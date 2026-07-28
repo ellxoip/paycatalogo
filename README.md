@@ -133,6 +133,32 @@ nativo despliega cualquier cosa que se empuje, incluido código que no compila, 
 un servicio que cobra dinero real. Dos mecanismos activos significan que el
 camino sin tests gana la carrera.
 
+### Dónde vive el servicio (y por qué ahí)
+
+| | |
+|---|---|
+| Workspace Render | **Zelix Pagos** (`tea-d9kb8gn10e5c73arahb0`) |
+| Servicio | `srv-d9kfrgh42hec73aq17h0` |
+| URL | `https://zelixpay-qy3w.onrender.com` |
+| Público | `www.zelix.cl/catalogo/pay` (proxy Cloudflare, repo `Zelix`) |
+
+Vive **solo** en su workspace a propósito. Render asigna 750 h de instancia al
+mes por workspace y, al agotarlas, suspende todos los servicios free de ese
+workspace hasta el día 1. Mientras pagos y WhatsApp compartían presupuesto,
+ninguno podía estar despierto todo el día sin arriesgar apagar al otro. Ahora
+cada uno tiene sus 750 h y el keep-alive corre 23 h/día (713 h, margen 3,6%).
+
+Render **no permite transferir servicios entre workspaces**: hubo que recrear
+éste por API (`POST /v1/services`) el 2026-07-28. El servicio anterior
+(`srv-d9c1v8favr4c73a5k3u0`, `zelixpay.onrender.com`) quedó **suspendido**, no
+borrado, por si hiciera falta volver.
+
+Si algún día hay que repetir la mudanza, la URL nueva vive en cuatro lugares y
+los cuatro deben moverse en el mismo acto: `APP_URL` del servicio (la que Flow
+usa para `urlConfirmation`), `ZELIXPAY_ORIGIN` en el proxy de Cloudflare, el
+secreto `RENDER_SERVICE_ID` en GitHub, y las URLs de los workflows y de
+`scripts/deploy.mjs`.
+
 ### Secretos requeridos en el repositorio
 
 | Secreto | Para qué |
