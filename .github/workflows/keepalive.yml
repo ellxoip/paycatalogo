@@ -14,15 +14,21 @@
 # semanas es un pésimo negocio.
 #
 # Por qué SÍ en horario comercial: una PYME chilena no recibe pedidos a las 4 AM.
-# Despierto 09:00–23:00 (hora de Chile) son ~465 h/mes, y de madrugada el primer
+# El cron cubre 16 h diarias — 08:00 a 24:00 de Chile — y de madrugada el primer
 # cliente paga un arranque en frío que nadie está esperando.
 #
 # ── PRESUPUESTO DEL WORKSPACE (750 h/mes, compartidas) ──────────────────────
-#   zelixpay despierto 09:00–23:00 .......... ~465 h
-#   zelix (WhatsApp), despertares por Meta ... ~150 h  (estimado, variable)
-#   deploys + monitoreo ...................... ~25 h
-#   ─────────────────────────────────────────────────
-#   total .................................... ~640 h de 750  (margen ~110 h)
+#   zelixpay despierto 08:00–24:00 (16 h × 31) ... ~496 h
+#   zelix (WhatsApp), despertares por Meta ....... ~150 h  (ESTIMADO, variable)
+#   deploys + monitoreo .......................... ~25 h
+#   ────────────────────────────────────────────────────
+#   total ........................................ ~671 h de 750 (margen ~79 h)
+#
+# El margen es de ~10%: alcanza, pero NO sobra. La cifra de WhatsApp es una
+# estimación, no una medición — Render no expone el consumo de instancias free
+# por API. La cifra real está en el dashboard (Billing → uso free). Si ese
+# número se acerca a 750 antes de fin de mes, recortar primero este cron
+# (por ejemplo a '*/10 13-23 * * *', 11 h/día ≈ 341 h) antes que el monitoreo.
 #
 # Si zelixpay se mueve a su PROPIO workspace Hobby (Render permite hasta 5, cada
 # uno con sus 750 h), este cron puede pasar a 24/7 sin tocar nada más: son 744 h
