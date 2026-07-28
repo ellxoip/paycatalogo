@@ -30,6 +30,27 @@
 # número se acerca a 750 antes de fin de mes, recortar primero este cron
 # (por ejemplo a '*/10 13-23 * * *', 11 h/día ≈ 341 h) antes que el monitoreo.
 #
+# ── CÓMO LLEGAR A "SIEMPRE ENCENDIDO" SIN PAGAR ─────────────────────────────
+# Render permite hasta CINCO workspaces Hobby y las 750 h son POR WORKSPACE
+# (render.com/docs → Deploy for Free / Workspaces). Hoy pagos y WhatsApp
+# comparten uno, y ahí está el techo real. Con un workspace por servicio, cada
+# uno tiene su propio presupuesto.
+#
+# ⚠ ORDEN OBLIGATORIO. NO tocar este cron antes de separar los workspaces: con
+#   un solo workspace, subir este servicio a 23 h/día (713 h) más los
+#   despertares de WhatsApp supera las 750 h y Render suspende AMBOS servicios
+#   hasta el día 1. El atajo no adelanta nada: apaga todo dos semanas.
+#
+#   Paso 1 (dashboard, no hay API): crear un segundo workspace Hobby y
+#           transferir a él el servicio zelixpay.
+#   Paso 2: recién ahí, cambiar el cron de este archivo a '*/10 5-23,0-3 * * *'
+#           → 23 h/día ≈ 713 h dentro de un presupuesto propio de 750 h.
+#
+# Por qué 23 h y no 24: un mes de 31 días son 744 h contra 750 disponibles —
+# seis horas de margen, menos del 1%, y cada deploy levanta una instancia nueva
+# mientras drena la vieja. El hueco de 04:00 a 05:00 (Chile) no le cuesta una
+# venta a nadie y convierte un 0,8% de margen en un 5%.
+#
 # Si zelixpay se mueve a su PROPIO workspace Hobby (Render permite hasta 5, cada
 # uno con sus 750 h), este cron puede pasar a 24/7 sin tocar nada más: son 744 h
 # contra un presupuesto entero, y el de WhatsApp deja de competir por las mismas
