@@ -68,11 +68,37 @@ const api = (ruta, init = {}) =>
     headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
   });
 
+/**
+ * Lee JSON de la API tolerando fallos transitorios. La API de Render responde a
+ * veces con cuerpo vacío o con un 429, y un `JSON.parse` sobre eso reventaba el
+ * proceso entero: el deploy seguía avanzando en Render mientras el script moría
+ * y dejaba el run en rojo. Un error de red de un segundo no puede convertirse en
+ * un despliegue "fallido" que no falló.
+ * Devuelve null si no se pudo leer: quien llama decide si eso es fatal.
+ */
+async function apiJson(ruta) {
+  try {
+    const res = await api(ruta);
+    const texto = await res.text();
+    if (!res.ok) {
+      console.log(`  · API respondió ${res.status}${texto ? `: ${texto.slice(0, 120)}` : ' (sin cuerpo)'}`);
+      return null;
+    }
+    if (!texto.trim()) {
+      console.log('  · API respondió 200 con cuerpo vacío (transitorio)');
+      return null;
+    }
+    return JSON.parse(texto);
+  } catch (e) {
+    console.log(`  · No se pudo consultar la API: ${e.message}`);
+    return null;
+  }
+}
+
 /** Commit que Render tiene efectivamente en vivo (no el que alguien cree). */
 async function commitEnVivo() {
-  const res = await api(`/services/${SERVICE_ID}/deploys?limit=20`);
-  if (!res.ok) return null;
-  const deploys = await res.json();
+  const deploys = await apiJson(`/services/${SERVICE_ID}/deploys?limit=20`);
+  if (!Array.isArray(deploys)) return null;
   const vivo = deploys.find((d) => d.deploy?.status === 'live');
   return vivo?.deploy?.commit?.id || null;
 }
@@ -163,12 +189,25 @@ const deployId = await paso('Lanzando deploy en Render', async () => {
 });
 
 await paso('Esperando a que quede en vivo', async () => {
+  let fallosSeguidos = 0;
   for (let i = 1; i <= 60; i++) {
-    const { status } = await api(`/services/${SERVICE_ID}/deploys/${deployId}`).then((r) => r.json());
-    console.log(`  [${i}] ${status}`);
-    if (status === 'live') return;
-    if (['build_failed', 'update_failed', 'canceled', 'pre_deploy_failed'].includes(status)) {
-      console.error(`  ✗ El deploy terminó en '${status}'.`);
+    const info = await apiJson(`/services/${SERVICE_ID}/deploys/${deployId}`);
+    if (!info?.status) {
+      // Una consulta que no se pudo leer NO es un deploy fallido: se reintenta.
+      // Solo se abandona si la API queda inaccesible de forma sostenida.
+      if (++fallosSeguidos >= 8) {
+        console.error('  ✗ La API de Render lleva 8 consultas seguidas sin responder; se abandona el seguimiento.');
+        console.error('    El deploy puede seguir en curso: revisar el dashboard antes de relanzarlo.');
+        process.exit(1);
+      }
+      await new Promise((r) => setTimeout(r, 15000));
+      continue;
+    }
+    fallosSeguidos = 0;
+    console.log(`  [${i}] ${info.status}`);
+    if (info.status === 'live') return;
+    if (['build_failed', 'update_failed', 'canceled', 'pre_deploy_failed'].includes(info.status)) {
+      console.error(`  ✗ El deploy terminó en '${info.status}'.`);
       process.exit(1);
     }
     await new Promise((r) => setTimeout(r, 15000));
