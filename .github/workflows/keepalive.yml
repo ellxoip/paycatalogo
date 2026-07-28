@@ -1,76 +1,50 @@
-# Mantiene despierto el servicio de pagos DURANTE HORARIO COMERCIAL.
+# Mantiene despierto el servicio de pagos casi todo el día.
 #
 # El problema: un servicio free duerme tras 15 min sin tráfico y tarda ~1 min en
-# despertar. En el peor momento posible — el cliente vuelve de Flow después de
-# pagar y ve un minuto de pantalla de carga, justo cuando se pregunta si su plata
-# se fue a alguna parte. La confirmación del pago ocurre en ese regreso, así que
-# no es solo estética.
+# despertar. El peor momento posible para eso es el regreso del cliente desde
+# Flow: la confirmación del pago ocurre en ese redirect, así que el comprador
+# vería un minuto de pantalla de carga justo cuando se pregunta dónde quedó su
+# plata. No es estética, es la confianza en el cobro.
 #
-# Por qué NO 24/7: el presupuesto no da. Render otorga 750 horas de instancia al
-# mes POR WORKSPACE y hoy los dos servicios (pagos y WhatsApp) comparten uno
-# solo. Mantener uno despierto todo el mes cuesta ~744 h: dejaría 6 h para el
-# otro, y al agotar la cuota Render SUSPENDE TODOS los servicios free del
-# workspace hasta el día 1. Cambiar arranques en frío por una caída total de dos
-# semanas es un pésimo negocio.
+# ── POR QUÉ AHORA SE PUEDE (2026-07-28) ─────────────────────────────────────
+# Render da 750 h de instancia al mes POR WORKSPACE y al agotarlas suspende
+# TODOS los servicios free de ese workspace hasta el día 1. Antes, pagos y
+# WhatsApp compartían un solo presupuesto y esto solo alcanzaba para 16 h/día.
 #
-# Por qué SÍ en horario comercial: una PYME chilena no recibe pedidos a las 4 AM.
-# El cron cubre 16 h diarias — 08:00 a 24:00 de Chile — y de madrugada el primer
-# cliente paga un arranque en frío que nadie está esperando.
+# Este servicio vive ahora SOLO en el workspace "Zelix Pagos", con sus 750 h
+# propias. Render no permite transferir servicios entre workspaces (no hay
+# opción en el dashboard, `/transfer` da 404 y un PATCH con ownerId se ignora en
+# silencio), así que se recreó por API replicando repo, comandos y variables.
+# WhatsApp quedó solo en el workspace original con sus otras 750 h: ninguno de
+# los dos puede volver a apagar al otro por consumo.
 #
-# ── PRESUPUESTO DEL WORKSPACE (750 h/mes, compartidas) ──────────────────────
-#   zelixpay despierto 08:00–24:00 (16 h × 31) ... ~496 h
-#   zelix (WhatsApp), despertares por Meta ....... ~150 h  (ESTIMADO, variable)
-#   deploys + monitoreo .......................... ~25 h
-#   ────────────────────────────────────────────────────
-#   total ........................................ ~671 h de 750 (margen ~79 h)
+# ── PRESUPUESTO (750 h/mes, solo para este servicio) ────────────────────────
+#   despierto 23 h/día × 31 días .............. 713 h
+#   cola de 15 min tras el último ping ........ 8 h
+#   deploys (instancia nueva mientras drena) .. 2 h
+#   monitoreo ................................. 0 h  ← ver nota
+#   ─────────────────────────────────────────────────
+#   total ..................................... 723 h de 750 (margen 27 h, 3,6%)
 #
-# El margen es de ~10%: alcanza, pero NO sobra. La cifra de WhatsApp es una
-# estimación, no una medición — Render no expone el consumo de instancias free
-# por API. La cifra real está en el dashboard (Billing → uso free). Si ese
-# número se acerca a 750 antes de fin de mes, recortar primero este cron
-# (por ejemplo a '*/10 13-23 * * *', 11 h/día ≈ 341 h) antes que el monitoreo.
+# Nota sobre el monitoreo: los chequeos de salud de monitor.yml corren a las
+# 09, 16 y 23 UTC, todos DENTRO de esta ventana. Despiertan un servicio que ya
+# está despierto, así que no cuestan una hora extra. Si se mueve este cron, hay
+# que mover aquellos o el costo aparece de vuelta.
 #
-# ── CÓMO LLEGAR A "SIEMPRE ENCENDIDO" SIN PAGAR ─────────────────────────────
-# Render permite hasta CINCO workspaces Hobby y las 750 h son POR WORKSPACE
-# (render.com/docs → Deploy for Free / Workspaces). Hoy pagos y WhatsApp
-# comparten uno, y ahí está el techo real. Con un workspace por servicio, cada
-# uno tiene su propio presupuesto.
-#
-# ⚠ ORDEN OBLIGATORIO. NO tocar este cron antes de separar los workspaces: con
-#   un solo workspace, subir este servicio a 23 h/día (713 h) más los
-#   despertares de WhatsApp supera las 750 h y Render suspende AMBOS servicios
-#   hasta el día 1. El atajo no adelanta nada: apaga todo dos semanas.
-#
-#   Paso 1: RECREAR el servicio en un segundo workspace Hobby. Ojo: Render NO
-#           permite transferir servicios entre workspaces (verificado 2026-07-28:
-#           no hay opción en el dashboard, `POST /services/{id}/transfer` da 404
-#           y un PATCH con ownerId devuelve 200 pero se ignora en silencio). Hay
-#           que crearlo de nuevo — se puede por API (`POST /v1/services`)
-#           replicando repo, comandos y las 29 variables de entorno.
-#           El servicio nuevo tendrá OTRA URL, así que en el mismo movimiento hay
-#           que actualizar: APP_URL (es la que Flow usa para urlConfirmation),
-#           ZELIXPAY_ORIGIN en el proxy de Cloudflare, el secreto
-#           RENDER_SERVICE_ID en GitHub y las URLs de estos workflows.
-#   Paso 2: recién ahí, cambiar el cron de este archivo a '*/10 5-23,0-3 * * *'
-#           → 23 h/día ≈ 713 h dentro de un presupuesto propio de 750 h.
-#
-# Por qué 23 h y no 24: un mes de 31 días son 744 h contra 750 disponibles —
-# seis horas de margen, menos del 1%, y cada deploy levanta una instancia nueva
-# mientras drena la vieja. El hueco de 04:00 a 05:00 (Chile) no le cuesta una
-# venta a nadie y convierte un 0,8% de margen en un 5%.
-#
-# Si zelixpay se mueve a su PROPIO workspace Hobby (Render permite hasta 5, cada
-# uno con sus 750 h), este cron puede pasar a 24/7 sin tocar nada más: son 744 h
-# contra un presupuesto entero, y el de WhatsApp deja de competir por las mismas
-# horas. Ese es el momento de cambiar el cron a '*/10 * * * *'.
+# ── POR QUÉ 23 h Y NO 24 ────────────────────────────────────────────────────
+# Un mes de 31 días son 744 h contra 750 disponibles: seis horas de margen,
+# menos del 1%, y cada deploy levanta una instancia nueva mientras drena la
+# vieja. Invirtiendo la cuenta, conservar un 5% de colchón permite 750 × 0,95 ÷
+# 31 = 22,98 h/día. El hueco va de 04:00 a 05:00 de Chile: nadie compra a esa
+# hora, y si alguien lo hace paga un arranque en frío que nadie está esperando.
+# Es 24/7 para efectos del negocio, pero sobrevive a un mes con muchos deploys.
 
-name: Keep-alive (horario comercial)
+name: Keep-alive
 
 on:
   schedule:
-    # Cada 10 minutos entre 12:00 y 03:00 UTC = 09:00 a 23:00 en Chile (UTC-4).
-    - cron: '*/10 12-23 * * *'
-    - cron: '*/10 0-3 * * *'
+    # Cada 10 min en todas las horas UTC salvo la 08 (= 04:00 en Chile, UTC-4).
+    - cron: '*/10 0-7,9-23 * * *'
   workflow_dispatch:
 
 permissions:
@@ -86,13 +60,13 @@ jobs:
     timeout-minutes: 5
     steps:
       # Se golpea /health (liveness puro) y NO /api/health: el segundo consulta
-      # Postgres en cada llamada, y 4.300 consultas al mes solo para mantener
-      # el proceso despierto son gasto sin información. El health real ya lo
-      # revisa monitor.yml tres veces al día.
+      # Postgres en cada llamada, y ~4.200 consultas al mes solo para mantener
+      # el proceso despierto son gasto sin información. El health real —base,
+      # entorno, proveedores— lo revisa monitor.yml tres veces al día.
       - name: Ping
         run: |
           set -euo pipefail
           curl -sS --max-time 90 --retry 3 --retry-delay 20 --retry-all-errors \
             -o respuesta.json -w "HTTP %{http_code} en %{time_total}s\n" \
-            https://zelixpay.onrender.com/health
+            https://zelixpay-qy3w.onrender.com/health
           cat respuesta.json

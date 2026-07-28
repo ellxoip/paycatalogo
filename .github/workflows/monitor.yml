@@ -17,11 +17,12 @@
 #
 #   · estado-barato  → solo API de Render. NO toca el servicio, NO lo despierta,
 #                      cuesta 0 horas. Corre cada hora.
-#   · salud-y-outbox → SÍ despierta el servicio. 3 veces al día ≈ 22 h/mes.
+#   · salud-y-outbox → despierta el servicio, pero sus tres horarios caen dentro
+#                      de la ventana del keep-alive: el servicio ya está
+#                      despierto, así que el costo real también es 0 h.
 #
-# Total de monitoreo: ~22 h/mes de 750. El resto queda para clientes reales.
-# Si algún día se pasa a un plan sin sleep, subir la frecuencia del segundo job
-# es cambiar una línea de cron.
+# Desde el 2026-07-28 este servicio vive solo en el workspace "Zelix Pagos" con
+# sus 750 h propias, así que el monitoreo ya no compite con WhatsApp por horas.
 
 name: Monitor de producción
 
@@ -29,8 +30,10 @@ on:
   schedule:
     # Cada hora: lo que no cuesta horas de instancia.
     - cron: '0 * * * *'
-    # 08:00, 16:00 y 23:00 UTC (≈ 04:00, 12:00 y 19:00 en Chile): lo que sí.
-    - cron: '0 8,16,23 * * *'
+    # 09:00, 16:00 y 23:00 UTC: lo que sí. Las tres caen DENTRO de la ventana
+    # del keep-alive, así que despiertan un servicio ya despierto y no cuestan
+    # una hora extra. Moverlas fuera de esa ventana reintroduce el costo.
+    - cron: '0 9,16,23 * * *'
   workflow_dispatch:
 
 permissions:
@@ -98,7 +101,7 @@ jobs:
   # 3 veces al día y aprovecha el mismo despertar para dos cosas.
   # ───────────────────────────────────────────────────────────────────────────
   salud-y-outbox:
-    if: github.event.schedule == '0 8,16,23 * * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '0 9,16,23 * * *' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -108,7 +111,7 @@ jobs:
           # El plan free tarda ~1 min en despertar: sin reintentos generosos el
           # monitor reportaría caídas que son arranques en frío.
           curl -sS --max-time 90 --retry 6 --retry-delay 15 --retry-all-errors \
-            https://zelixpay.onrender.com/api/health > salud.json
+            https://zelixpay-qy3w.onrender.com/api/health > salud.json
           cat salud.json
           python3 - <<'PY'
           import json, sys
@@ -145,7 +148,7 @@ jobs:
           fi
           RESP=$(curl -sS --max-time 60 --retry 3 --retry-delay 10 --retry-all-errors \
             -H "Authorization: Bearer $CRON_SECRET" \
-            https://zelixpay.onrender.com/api/cron/process-outbox)
+            https://zelixpay-qy3w.onrender.com/api/cron/process-outbox)
           echo "$RESP"
           echo "$RESP" | python3 -c '
           import json, sys

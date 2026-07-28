@@ -35,8 +35,8 @@
 import { execSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 
-const SERVICE_ID = process.env.RENDER_SERVICE_ID || 'srv-d9c1v8favr4c73a5k3u0';
-const HEALTH_URL = process.env.DEPLOY_HEALTH_URL || 'https://zelixpay.onrender.com/api/health';
+const SERVICE_ID = process.env.RENDER_SERVICE_ID || 'srv-d9kfrgh42hec73aq17h0';
+const HEALTH_URL = process.env.DEPLOY_HEALTH_URL || 'https://zelixpay-qy3w.onrender.com/api/health';
 const soloVerificar = process.argv.includes('--check');
 const soloEstado = process.argv.includes('--status');
 
