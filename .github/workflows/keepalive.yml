@@ -1,0 +1,63 @@
+# Mantiene despierto el servicio de pagos DURANTE HORARIO COMERCIAL.
+#
+# El problema: un servicio free duerme tras 15 min sin tráfico y tarda ~1 min en
+# despertar. En el peor momento posible — el cliente vuelve de Flow después de
+# pagar y ve un minuto de pantalla de carga, justo cuando se pregunta si su plata
+# se fue a alguna parte. La confirmación del pago ocurre en ese regreso, así que
+# no es solo estética.
+#
+# Por qué NO 24/7: el presupuesto no da. Render otorga 750 horas de instancia al
+# mes POR WORKSPACE y hoy los dos servicios (pagos y WhatsApp) comparten uno
+# solo. Mantener uno despierto todo el mes cuesta ~744 h: dejaría 6 h para el
+# otro, y al agotar la cuota Render SUSPENDE TODOS los servicios free del
+# workspace hasta el día 1. Cambiar arranques en frío por una caída total de dos
+# semanas es un pésimo negocio.
+#
+# Por qué SÍ en horario comercial: una PYME chilena no recibe pedidos a las 4 AM.
+# Despierto 09:00–23:00 (hora de Chile) son ~465 h/mes, y de madrugada el primer
+# cliente paga un arranque en frío que nadie está esperando.
+#
+# ── PRESUPUESTO DEL WORKSPACE (750 h/mes, compartidas) ──────────────────────
+#   zelixpay despierto 09:00–23:00 .......... ~465 h
+#   zelix (WhatsApp), despertares por Meta ... ~150 h  (estimado, variable)
+#   deploys + monitoreo ...................... ~25 h
+#   ─────────────────────────────────────────────────
+#   total .................................... ~640 h de 750  (margen ~110 h)
+#
+# Si zelixpay se mueve a su PROPIO workspace Hobby (Render permite hasta 5, cada
+# uno con sus 750 h), este cron puede pasar a 24/7 sin tocar nada más: son 744 h
+# contra un presupuesto entero, y el de WhatsApp deja de competir por las mismas
+# horas. Ese es el momento de cambiar el cron a '*/10 * * * *'.
+
+name: Keep-alive (horario comercial)
+
+on:
+  schedule:
+    # Cada 10 minutos entre 12:00 y 03:00 UTC = 09:00 a 23:00 en Chile (UTC-4).
+    - cron: '*/10 12-23 * * *'
+    - cron: '*/10 0-3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keepalive-zelixpay
+  cancel-in-progress: true
+
+jobs:
+  despertar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Se golpea /health (liveness puro) y NO /api/health: el segundo consulta
+      # Postgres en cada llamada, y 4.300 consultas al mes solo para mantener
+      # el proceso despierto son gasto sin información. El health real ya lo
+      # revisa monitor.yml tres veces al día.
+      - name: Ping
+        run: |
+          set -euo pipefail
+          curl -sS --max-time 90 --retry 3 --retry-delay 20 --retry-all-errors \
+            -o respuesta.json -w "HTTP %{http_code} en %{time_total}s\n" \
+            https://zelixpay.onrender.com/health
+          cat respuesta.json
