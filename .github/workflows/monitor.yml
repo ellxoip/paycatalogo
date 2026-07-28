@@ -1,0 +1,156 @@
+# Monitoreo EXTERNO del servicio de pagos, presupuestado para el plan free.
+#
+# Por qué externo: un health que corre dentro del propio proceso solo puede
+# decir que el proceso está vivo. El 2026-07-27 respondía "ok" mientras el
+# chequeo real estaba tapado por un liveness falso. Quien vigila no puede ser el
+# vigilado.
+#
+# ── EL PRESUPUESTO MANDA EL DISEÑO ──────────────────────────────────────────
+# Render da 750 horas de instancia al mes POR WORKSPACE, compartidas entre todos
+# los servicios free, y al agotarlas SUSPENDE TODOS los servicios hasta el mes
+# siguiente. Un servicio free duerme tras 15 min sin tráfico.
+#
+# Consecuencia que no es obvia: cada request de monitoreo DESPIERTA el servicio
+# y arranca una ventana de 15 min. Vigilar cada hora costaría 24 × 15 min =
+# 6 h/día ≈ 180 h/mes — un cuarto del presupuesto gastado en mirar, no en
+# atender clientes. Por eso los chequeos están separados por lo que CUESTAN:
+#
+#   · estado-barato  → solo API de Render. NO toca el servicio, NO lo despierta,
+#                      cuesta 0 horas. Corre cada hora.
+#   · salud-y-outbox → SÍ despierta el servicio. 3 veces al día ≈ 22 h/mes.
+#
+# Total de monitoreo: ~22 h/mes de 750. El resto queda para clientes reales.
+# Si algún día se pasa a un plan sin sleep, subir la frecuencia del segundo job
+# es cambiar una línea de cron.
+
+name: Monitor de producción
+
+on:
+  schedule:
+    # Cada hora: lo que no cuesta horas de instancia.
+    - cron: '0 * * * *'
+    # 08:00, 16:00 y 23:00 UTC (≈ 04:00, 12:00 y 19:00 en Chile): lo que sí.
+    - cron: '0 8,16,23 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Cuesta 0 horas de instancia: habla con la API de Render, no con el servicio.
+  # ───────────────────────────────────────────────────────────────────────────
+  estado-barato:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # La alarma más importante del plan free: si se agotan las 750 horas,
+      # Render suspende TODOS los servicios free del workspace —pagos y
+      # WhatsApp— hasta el día 1 del mes siguiente. Enterarse por un cliente
+      # sería enterarse tarde.
+      - name: ¿El servicio sigue vivo y no suspendido?
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+          curl -sS -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID" > servicio.json
+          python3 - <<'PY'
+          import json, sys
+          s = json.load(open('servicio.json'))
+          suspendido = s.get('suspended')
+          print(f"suspended={suspendido} autoDeploy={s.get('autoDeploy')}")
+          fallas = []
+          if suspendido != 'not_suspended':
+              fallas.append(f"SERVICIO SUSPENDIDO ({suspendido}) — probable agotamiento de las 750 h free")
+          # autoDeploy debe seguir apagado: si alguien lo reactiva, aparece un
+          # camino que despliega SIN pasar por los tests.
+          if s.get('autoDeploy') != 'no':
+              fallas.append("autoDeploy fue reactivado: existe un camino de deploy sin puerta de tests")
+          if fallas:
+              print("::error::" + "; ".join(fallas)); sys.exit(1)
+          print("Servicio activo y sin caminos de deploy paralelos.")
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # Compara el commit vivo en Render contra origin/master. Sale 1 si hay
+      # drift. Solo consulta la API: no despierta el servicio.
+      - name: ¿Producción está al día?
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: npm run deploy:status
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # SÍ despierta el servicio (~15 min de instancia por corrida). Por eso corre
+  # 3 veces al día y aprovecha el mismo despertar para dos cosas.
+  # ───────────────────────────────────────────────────────────────────────────
+  salud-y-outbox:
+    if: github.event.schedule == '0 8,16,23 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Salud real del servicio
+        run: |
+          set -euo pipefail
+          # El plan free tarda ~1 min en despertar: sin reintentos generosos el
+          # monitor reportaría caídas que son arranques en frío.
+          curl -sS --max-time 90 --retry 6 --retry-delay 15 --retry-all-errors \
+            https://zelixpay.onrender.com/api/health > salud.json
+          cat salud.json
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open('salud.json'))
+          fallas = []
+          if d.get("database") != "connected":
+              fallas.append(f"base de datos: {d.get('database')}")
+          if d.get("environment") != "production":
+              fallas.append(f"entorno: {d.get('environment')}")
+          proveedores = d.get("providers") or {}
+          if "simulator" in proveedores:
+              fallas.append("el simulador de pagos está REGISTRADO: habría pagos que se aprueban solos")
+          if "flow" not in proveedores:
+              fallas.append("Flow NO está registrado: no se puede cobrar")
+          elif not proveedores["flow"].get("healthy", False):
+              fallas.append("Flow reporta estado no saludable")
+          if fallas:
+              print("::error::" + "; ".join(fallas)); sys.exit(1)
+          print("Salud OK: producción, base conectada, solo Flow.")
+          PY
+
+      # El servicio ya está despierto por el paso anterior: drenar el outbox
+      # aquí no cuesta horas adicionales. Importa porque en Render NO hay cron
+      # (el de vercel.json nunca corrió acá): sin esto, un evento order.paid
+      # cuyo intento inline falló se quedaría esperando para siempre.
+      - name: Drenar el outbox (order.paid pendientes)
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::warning::Sin CRON_SECRET: no se pudo drenar el outbox."
+            exit 0
+          fi
+          RESP=$(curl -sS --max-time 60 --retry 3 --retry-delay 10 --retry-all-errors \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            https://zelixpay.onrender.com/api/cron/process-outbox)
+          echo "$RESP"
+          echo "$RESP" | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          if not d.get("ok"):
+              print("::error::El cron del outbox falló: " + str(d)); sys.exit(1)
+          print("Outbox procesado.")
+          '

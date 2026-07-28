@@ -1,0 +1,74 @@
+# FUENTE DE VERDAD DEL DESPLIEGUE de zelixpay.
+#
+# Por qué no el auto-deploy nativo de Render: no existía. Evidencia del
+# 2026-07-27 — este servicio acumula 7 deploys históricos y NINGUNO con trigger
+# `new_commit` (1 `manual` + 6 `api`), mientras el servicio hermano `zelix`
+# lleva 45 `new_commit`. La GitHub App de Render nunca tuvo acceso a este
+# repositorio: el `autoDeploy: yes` del panel era una promesa vacía que dejó 11
+# días de código viejo en producción sin una sola alerta.
+#
+# Ese flag quedó en `no` a propósito. Si alguien reconecta la GitHub App, NO hay
+# que volver a encenderlo: el auto-deploy nativo despliega lo que sea que se
+# empuje, incluido código que no compila, a un servicio que cobra dinero real.
+# Este workflow no lo hace.
+#
+# El trabajo real vive en scripts/deploy.mjs, el mismo que corre `npm run deploy`
+# en local: un solo procedimiento invocado desde dos lugares, para que el camino
+# de emergencia no pueda divergir del automático.
+
+name: Deploy a Render
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Solo lectura del repo: este workflow no escribe en GitHub, únicamente llama a
+# la API de Render con un secreto.
+permissions:
+  contents: read
+
+concurrency:
+  # Un deploy a la vez. Si llegan dos pushes seguidos, el segundo cancela al
+  # primero en vez de dejar dos builds compitiendo por el mismo servicio.
+  group: deploy-render-zelixpay
+  cancel-in-progress: true
+
+jobs:
+  desplegar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # deploy.mjs compara el commit vivo en Render contra origin/master y
+          # lista los commits pendientes: necesita historia, no un checkout
+          # superficial de un solo commit.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # `npm ci` respeta el lockfile. El postinstall corre `prisma generate`,
+      # que no necesita base de datos.
+      - name: Instalar dependencias
+        run: npm ci
+
+      # Typecheck + tests + deploy + espera de 'live' + verificación de
+      # /api/health + confirmación de que no quedó drift. Si algo falla, el
+      # script sale distinto de cero y el job se pone rojo: no hay forma de que
+      # un despliegue roto termine en verde.
+      - name: Verificar y desplegar
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RENDER_API_KEY:-}" ] || [ -z "${RENDER_SERVICE_ID:-}" ]; then
+            echo "::error::Faltan los secretos RENDER_API_KEY o RENDER_SERVICE_ID en el repositorio."
+            exit 1
+          fi
+          npm run deploy
