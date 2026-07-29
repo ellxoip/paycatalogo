@@ -1,0 +1,159 @@
+{
+  "_": "SET CANÓNICO DE PARIDAD DEL PRECIO. Lo consumen los tests de los DOS repos (zelix y zelixpay). El generador lo copia a zelixpay/shared/. Cada caso 'cobra' es el valor exacto que debe cobrarse; null significa que NO se puede cobrar y el checkout debe rechazar con motivo.",
+  "casos": [
+    {
+      "precio": "$4.990",
+      "cobra": 4990,
+      "motivo": null
+    },
+    {
+      "precio": "$990",
+      "cobra": 990,
+      "motivo": null
+    },
+    {
+      "precio": "$12.000.000",
+      "cobra": 12000000,
+      "motivo": null
+    },
+    {
+      "precio": "3.990 pesos",
+      "cobra": 3990,
+      "motivo": null
+    },
+    {
+      "precio": "12000 CLP",
+      "cobra": 12000,
+      "motivo": null
+    },
+    {
+      "precio": "25 lucas",
+      "cobra": 25000,
+      "motivo": null
+    },
+    {
+      "precio": "25 mil",
+      "cobra": 25000,
+      "motivo": null
+    },
+    {
+      "precio": "2.5k",
+      "cobra": 2500,
+      "motivo": null
+    },
+    {
+      "precio": "$8.500 c/u",
+      "cobra": 8500,
+      "motivo": null
+    },
+    {
+      "precio": "IVA incluido $19.990",
+      "cobra": 19990,
+      "motivo": null
+    },
+    {
+      "precio": "te lo dejo en $8.000",
+      "cobra": 8000,
+      "motivo": null
+    },
+    {
+      "precio": "$3.000 ($3.000 con despacho)",
+      "cobra": 3000,
+      "motivo": null
+    },
+    {
+      "precio": "2 x $3.000",
+      "cobra": 3000,
+      "motivo": null,
+      "bug": "cobraba $2"
+    },
+    {
+      "precio": "5kg $4.990",
+      "cobra": 4990,
+      "motivo": null,
+      "bug": "cobraba $5"
+    },
+    {
+      "precio": "12 unidades $9.990",
+      "cobra": 9990,
+      "motivo": null,
+      "bug": "cobraba $12"
+    },
+    {
+      "precio": "Pack 6 x $12.000",
+      "cobra": 12000,
+      "motivo": null,
+      "bug": "cobraba $6"
+    },
+    {
+      "precio": "desde $5.000",
+      "cobra": null,
+      "motivo": "rango"
+    },
+    {
+      "precio": "entre $3.000 y $9.000",
+      "cobra": null,
+      "motivo": "rango",
+      "bug": "cobraba $3.000, el menor"
+    },
+    {
+      "precio": "hasta $20.000",
+      "cobra": null,
+      "motivo": "rango"
+    },
+    {
+      "precio": "$3.000 $9.000",
+      "cobra": null,
+      "motivo": "ambiguo"
+    },
+    {
+      "precio": "",
+      "cobra": null,
+      "motivo": "sin_precio"
+    },
+    {
+      "precio": "   ",
+      "cobra": null,
+      "motivo": "sin_precio"
+    },
+    {
+      "precio": "Consultar",
+      "cobra": null,
+      "motivo": "sin_precio"
+    },
+    {
+      "precio": "A convenir",
+      "cobra": null,
+      "motivo": "sin_precio"
+    },
+    {
+      "precio": "$50",
+      "cobra": null,
+      "motivo": "sin_precio",
+      "nota": "bajo el mínimo: no se distingue de un gramaje"
+    },
+    {
+      "precio": "2.249",
+      "cobra": 2249,
+      "motivo": null,
+      "nota": "campo dedicado sin simbolo: es un precio"
+    },
+    {
+      "precio": "12990",
+      "cobra": 12990,
+      "motivo": null,
+      "nota": "idem, sin separador de miles"
+    },
+    {
+      "precio": "1.500",
+      "cobra": 1500,
+      "motivo": null
+    },
+    {
+      "precio": "2,5",
+      "cobra": null,
+      "motivo": "sin_precio",
+      "nota": "bajo el minimo, no es plata"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import prisma from '../lib/prisma.js';
+import { leerPrecioCatalogo, type MotivoPrecioNoCobrable } from '../../shared/precio.generado.js';
 import type { Prisma } from '@prisma/client';
 import { catalogService, productoDisponible } from './catalog.service.js';
 import { providerRegistry } from '../providers/index.js';
@@ -14,16 +15,23 @@ import type {
 
 const APP_URL = process.env.APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:4000');
 
-// Precio del catálogo es texto libre ("$12.990", "12990", null) — se toma el
-// primer número que aparezca; sin match o sin precio publicado, el producto
-// no se puede vender (el dueño lo confirma en la conversación, no en el carrito).
-function parsePrecio(precio: string | null): number | null {
-  if (!precio) return null;
-  const match = precio.replace(/\./g, '').replace(/,/g, '.').match(/\d+(\.\d+)?/);
-  if (!match) return null;
-  const value = Number(match[0]);
-  return Number.isFinite(value) && value > 0 ? Math.round(value) : null;
-}
+/**
+ * Motivo legible para el cliente cuando un precio de catálogo NO se puede cobrar.
+ *
+ * Antes acá vivía un `parsePrecio` que tomaba el primer número del string: un
+ * producto con precio "2 x $3.000" se cobraba a $2, y "5kg $4.990" a $5. Nunca
+ * cobraba de más — siempre de menos, y la diferencia la perdía la pyme.
+ *
+ * Ahora la lectura la hace la sede única (`precio.generado.ts`, copia verificada
+ * del repo zelix) y lo ambiguo se RECHAZA con motivo en vez de adivinarse. Un
+ * checkout rechazado se arregla corrigiendo el catálogo; un cobro por $2 se
+ * descubre cuando el producto ya salió por la puerta.
+ */
+const MOTIVO_PRECIO: Record<MotivoPrecioNoCobrable, string> = {
+  sin_precio: 'no tiene precio publicado',
+  rango: 'tiene un precio referencial (un rango), no un precio final',
+  ambiguo: 'tiene más de un precio y no se puede saber cuál corresponde',
+};
 
 /** Huella de la request que crea la orden (para fraudGuard y auditoría). */
 export interface OrderRequestContext {
@@ -66,11 +74,15 @@ export class PaymentService {
       if (typeof producto.stock === 'number' && cantidad > producto.stock) {
         throw { message: `"${producto.nombre}" solo tiene ${producto.stock} unidad(es) disponible(s)`, status: 400, code: 'INSUFFICIENT_STOCK' };
       }
-      const precio = parsePrecio(producto.precio);
-      if (precio === null) {
-        throw { message: `"${producto.nombre}" no tiene precio publicado — no se puede agregar al carrito`, status: 400, code: 'PRODUCT_WITHOUT_PRICE' };
+      const lectura = leerPrecioCatalogo(producto.precio);
+      if (lectura.cobrable !== true) {
+        throw {
+          message: `"${producto.nombre}" ${MOTIVO_PRECIO[lectura.motivo]} — no se puede cobrar. Pídele el precio al vendedor.`,
+          status: 400,
+          code: 'PRODUCT_WITHOUT_PRICE',
+        };
       }
-      orderItems.push({ product_id: producto.id, nombre_snapshot: producto.nombre, precio_snapshot: precio, cantidad });
+      orderItems.push({ product_id: producto.id, nombre_snapshot: producto.nombre, precio_snapshot: lectura.valor, cantidad });
     }
 
     const total = orderItems.reduce((acc, item) => acc + item.precio_snapshot * item.cantidad, 0);

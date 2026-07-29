@@ -1,3 +1,4 @@
+import { leerPrecioCatalogo } from '@/shared/precio.generado';
 import { getApiBaseUrl } from './env';
 
 export interface CatalogProduct {
@@ -43,15 +44,16 @@ export interface CreateOrderResponse {
 const API_BASE_URL = getApiBaseUrl();
 const CART_KEY = 'zelixpay.cart';
 
-// El precio del catálogo es texto libre ("$12.990", null); se extrae el primer
-// número. Productos sin precio publicado no se pueden agregar al carrito — el
-// backend re-valida esto igual al crear la orden.
+// El precio del catálogo es texto libre ("$12.990", "2 x $3.000", null). La
+// lectura la hace la SEDE ÚNICA, la misma copia verificada que usa el cobro en
+// el servidor: si el carrito mostrara un número y el cobro ejecutara otro,
+// tendríamos el peor bug posible en una pasarela de pagos.
+//
+// Antes acá vivía un "primer número gana" que mostraba $2 para un producto de
+// "2 x $3.000". El backend re-valida igual al crear la orden.
 export function parsePrecio(precio: string | null): number | null {
-  if (!precio) return null;
-  const match = precio.replace(/\./g, '').replace(/,/g, '.').match(/\d+(\.\d+)?/);
-  if (!match) return null;
-  const value = Number(match[0]);
-  return Number.isFinite(value) && value > 0 ? Math.round(value) : null;
+  const lectura = leerPrecioCatalogo(precio);
+  return lectura.cobrable ? lectura.valor : null;
 }
 
 export function formatCurrency(amount: number, moneda = 'CLP') {
